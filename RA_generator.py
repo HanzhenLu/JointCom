@@ -44,7 +44,7 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
-#os.environ["CUDA_VISIBLE_DEVICES"]="1"
+#os.environ["CUDA_VISIBLE_DEVICES"]="0"
 class Example(object):
     """A single training/test example."""
     def __init__(self,
@@ -63,22 +63,23 @@ class Example(object):
 def read_examples(filename):
     """Read examples from filename."""
     examples = []
+    index = 0
     with open(filename,encoding="utf-8") as f:
         for idx, line in enumerate(f):
             line = line.strip()
             js = json.loads(line)
             if 'idx' not in js:
                 js['idx']=idx
-            if 'similar_code_0' not in js:
-                js['similar_code_0'] = None
-                js['similar_comment_0'] = None
+            if 'similar_code_{}'.format(index) not in js:
+                js['similar_code_{}'.format(index)] = None
+                js['similar_comment_{}'.format(index)] = None
             examples.append(
                 Example(
                         idx = idx,
-                        source = js['source_code'],
-                        target = js['source_comment'],
-                        similar_code=js['similar_code_0'],
-                        similar_comment=js['similar_comment_0']
+                        source = ' '.join(js['source_code']) if type(js['source_code']) is list else js['source_code'],
+                        target = ' '.join(js['source_comment']) if type(js['source_comment']) is list else js['source_comment'],
+                        similar_code = ' '.join(js['similar_code_{}'.format(index)]) if type(js['similar_code_{}'.format(index)]) is list else js['similar_code_{}'.format(index)],
+                        similar_comment = ' '.join(js['similar_comment_{}'.format(index)]) if type(js['similar_comment_{}'.format(index)]) is list else js['similar_comment_{}'.format(index)]
                         ) 
             )
     return examples
@@ -98,30 +99,14 @@ class InputFeatures(object):
 def convert_examples_to_features(examples, tokenizer, args,stage=None):
     """convert examples to token ids"""
     features = []
-    prefix = [tokenizer.cls_token,"<encoder-decoder>",tokenizer.sep_token,"<mask0>"]
-    prefix = tokenizer.convert_tokens_to_ids(prefix)
-    postfix = [tokenizer.sep_token]
-    postfix =tokenizer.convert_tokens_to_ids(postfix)
-    max_code_length = int(args.max_source_length*4/9)
-    max_nl_length = int(args.max_source_length*5/9)
     for example_index, example in enumerate(examples):
         #source
         if example.similar_comment is None:
             source_tokens = tokenizer.tokenize(example.source)
-            source_ids = tokenizer.convert_tokens_to_ids(source_tokens) 
-            source_ids = prefix + source_ids[:max_code_length] + postfix
         else:
-            source_tokens = tokenizer.tokenize(example.source)
-            source_ids = tokenizer.convert_tokens_to_ids(source_tokens)[:max_code_length] 
-            padding_length = max_code_length - len(source_ids)
-            source_ids += [tokenizer.pad_token_id]*padding_length
-            source_ids += tokenizer.convert_tokens_to_ids([tokenizer.sep_token] + tokenizer.tokenize(example.similar_comment))
-            source_ids = source_ids[:max_nl_length]
-            padding_length = max_nl_length - len(source_ids)
-            source_ids += [tokenizer.pad_token_id]*padding_length
-            source_ids += tokenizer.convert_tokens_to_ids([tokenizer.sep_token] + tokenizer.tokenize(example.similar_code))
-            source_ids = prefix + source_ids[:args.max_source_length-5] + postfix
-        
+            source_tokens = tokenizer.tokenize(example.source)+[tokenizer.sep_token]+tokenizer.tokenize(example.similar_comment)+[tokenizer.sep_token]+tokenizer.tokenize(example.similar_code)
+        source_tokens = [tokenizer.cls_token,"<encoder-decoder>",tokenizer.sep_token,"<mask0>"]+source_tokens[:args.max_source_length-5]+[tokenizer.sep_token]
+        source_ids = tokenizer.convert_tokens_to_ids(source_tokens) 
         padding_length = args.max_source_length - len(source_ids)
         source_ids += [tokenizer.pad_token_id]*padding_length
  

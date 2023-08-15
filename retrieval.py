@@ -8,7 +8,7 @@ from model import Retriever
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
 from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
                           RobertaConfig, RobertaModel, RobertaTokenizer)  
-from finetune_retriever import MyDataset
+from finetune_retriever import TextDataset
 
 parser = argparse.ArgumentParser()
 
@@ -46,22 +46,22 @@ config = RobertaConfig.from_pretrained('microsoft/unixcoder-base')
 model = RobertaModel.from_pretrained('microsoft/unixcoder-base')
 
 model=Retriever(model)
-checkpoint_prefix = 'checkpoint-best-result'
+checkpoint_prefix = 'checkpoint-best-mrr'
 model_dir = os.path.join(args.model_dir, '{}'.format(checkpoint_prefix))
-model_dir = os.path.join(model_dir, '{}'.format('retriever.bin'))
+model_dir = os.path.join(model_dir, '{}'.format('model.bin'))
 model_to_load = model.module if hasattr(model, 'module') else model
 model_to_load.load_state_dict(torch.load(model_dir))
 model.to(device)
     
-train_dataset = MyDataset(tokenizer, args, args.train_data_file)
+train_dataset = TextDataset(tokenizer, args, args.train_data_file)
 train_sampler = SequentialSampler(train_dataset)
 train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.retrieval_batch_size)
 
-valid_dataset = MyDataset(tokenizer, args, args.eval_data_file)
+valid_dataset = TextDataset(tokenizer, args, args.eval_data_file)
 valid_sampler = SequentialSampler(valid_dataset)
 valid_dataloader = DataLoader(valid_dataset, sampler=valid_sampler, batch_size=args.retrieval_batch_size)
 
-test_dataset = MyDataset(tokenizer, args, args.test_data_file)
+test_dataset = TextDataset(tokenizer, args, args.test_data_file)
 test_sampler = SequentialSampler(test_dataset)
 test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=args.retrieval_batch_size)
 
@@ -69,7 +69,6 @@ model.eval()
 train_vecs = [] 
 valid_vecs = []
 test_vecs = []
-comment_vecs = []
 if not os.path.exists(args.output_dir):
     os.makedirs(args.output_dir)
 
@@ -80,7 +79,6 @@ with torch.no_grad():
         code_vec = model(code_inputs=code_inputs)
         comment_vec = model(nl_inputs=comment_inputs)
         train_vecs.append(code_vec.cpu().numpy())
-        comment_vecs.append(comment_vec.cpu().numpy())
         
     for batch in tqdm(valid_dataloader):  
         code_inputs = batch[0].to(device)
@@ -95,7 +93,6 @@ with torch.no_grad():
 train_vecs = np.concatenate(train_vecs,0)
 valid_vecs = np.concatenate(valid_vecs,0)
 test_vecs = np.concatenate(test_vecs,0)
-comment_vecs = np.concatenate(comment_vecs,0)
 
 train_scores = np.zeros((train_vecs.shape[0],5),dtype=float)
 train_sort_ids = np.zeros((train_vecs.shape[0],5),dtype=int)
@@ -149,7 +146,7 @@ for i in range(len(valid_dataset)):
     js['idx'] = i
     js['source_code'] = valid_dataset.data[i]['code_tokens']
     js['source_comment'] = valid_dataset.data[i]['docstring_tokens']
-    for j in range(4):
+    for j in range(1):
         js['similar_code_{}'.format(j)] = train_dataset.data[valid_sort_ids[i][j]]['code_tokens']
         js['similar_comment_{}'.format(j)] = train_dataset.data[valid_sort_ids[i][j]]['docstring_tokens']
         js['score_{}'.format(j)] = valid_scores[i][j]
