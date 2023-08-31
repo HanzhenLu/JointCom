@@ -2,6 +2,8 @@
 # Licensed under the MIT License.
 import torch.nn as nn
 import torch    
+import numpy as np
+import random
 class Retriever(nn.Module):   
     def __init__(self, encoder):
         super(Retriever, self).__init__()
@@ -49,7 +51,7 @@ class Seq2Seq(nn.Module):
         self.sos_id = sos_id
         self.eos_id = eos_id       
         
-    def forward(self, source_ids, target_ids=None):   
+    def forward(self, source_ids, target_ids=None, score=None):   
         if target_ids is None:
             return self.generate(source_ids)
         
@@ -61,24 +63,34 @@ class Seq2Seq(nn.Module):
 
         out = self.decoder(target_ids,attention_mask=mask,past_key_values=encoder_output.past_key_values).last_hidden_state
         lm_logits = self.lm_head(out)
-        # Shift so that tokens < n predict n
-        active_loss = target_ids[..., 1:].ne(1).view(-1)
-        shift_logits = lm_logits[..., :-1, :].contiguous()
-        shift_labels = target_ids[..., 1:].contiguous()
-        # Flatten the tokens
         loss_fct = nn.CrossEntropyLoss(ignore_index=-1)
-        loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1))[active_loss],
-                        shift_labels.view(-1)[active_loss])
+        
+        # Calculate each input's loss
+        losses = None
+        for idx, (lm_logit, target_id) in enumerate(zip(lm_logits, target_ids)):
+            
+            # Shift so that tokens < n predict n
+            active_position = target_id[1:].ne(1).view(-1)
+            shift_logit = lm_logit[:-1, :].contiguous()
+            shift_label = target_id[1:].contiguous()
+            
+            # Flatten the tokens
+            loss = loss_fct(shift_logit.view(-1, lm_logits.size(-1))[active_position],
+                            shift_label[active_position])
 
-        outputs = loss,loss*active_loss.sum(),active_loss.sum()
-        return outputs
+            if losses is None:
+                losses = loss
+            else:
+                losses += loss
+        
+        return losses
     
     def generate(self, source_ids):
         mask = source_ids.ne(1)[:,None,:]*source_ids.ne(1)[:,:,None]
         encoder_output = self.encoder(source_ids,attention_mask=mask,use_cache=True)        
         preds = []       
         zero = torch.cuda.LongTensor(1).fill_(0)   
-        source_len = list(source_ids.ne(1).sum(-1).cpu().numpy())
+        #source_len = list(source_ids.ne(1).sum(-1).cpu().numpy())
         source_len = [len(x) for x in source_ids]
         for i in range(source_ids.shape[0]):
             context = [[x[i:i+1,:,:source_len[i]].repeat(self.beam_size,1,1,1) for x in y] 
@@ -222,3 +234,39 @@ class Beam(object):
                 tokens.append(tok)
             sentence.append(tokens)
         return sentence
+
+class DataBase(object):
+    def __init__(self, vector) -> None:
+        self.vector = vector
+        self.history = []
+        
+    def __len__(self):
+        return self.vector.shape[0]
+    
+    def search(self, query, number, stage=None):
+        scores = np.matmul(query, self.vector.T)
+        sort_ids = np.argsort(scores, axis=-1, kind='quicksort', order=None)[:,::-1]
+        
+        index = []
+        for i in range(len(sort_ids)):
+            index.append(sort_ids[i][0:number])
+        
+        if stage == "train":
+            for line in index:
+                rand = line[0]
+                while rand == line[0]:
+                    rand = random.randint(0, self.vector.shape[0]-1)
+                line[0] = rand
+            self.history.append(index)
+                
+        return index
+    
+    def get_history(self):
+        temp = self.history
+        self.history = []
+        return temp
+    
+    def update(self, index, vectors):
+        for id, vector in zip(index, vectors):
+            self.vector[id] = vector
+        

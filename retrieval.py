@@ -75,9 +75,7 @@ if not os.path.exists(args.output_dir):
 with torch.no_grad():
     for batch in tqdm(train_dataloader):  
         code_inputs = batch[0].to(device)
-        comment_inputs = batch[1].to(device)
         code_vec = model(code_inputs=code_inputs)
-        comment_vec = model(nl_inputs=comment_inputs)
         train_vecs.append(code_vec.cpu().numpy())
         
     for batch in tqdm(valid_dataloader):  
