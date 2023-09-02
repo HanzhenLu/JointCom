@@ -433,11 +433,73 @@ def main():
                     patience =0
                 else:
                     patience += 1
-                    if patience == 2:
+                    if patience == 4:
                         break
                 
+    if args.do_test:
+        checkpoint_prefix = 'checkpoint-best-bleu/generator_model.bin'
+        output_dir = os.path.join(args.output_dir, checkpoint_prefix)  
+        model_to_load = generator.module if hasattr(generator, 'module') else generator  
+        model_to_load.load_state_dict(torch.load(output_dir))                
         
+        checkpoint_prefix = 'checkpoint-best-bleu/retriever_model.bin'
+        output_dir = os.path.join(args.output_dir, checkpoint_prefix)  
+        model_to_load = retriever.module if hasattr(retriever, 'module') else retriever  
+        model_to_load.load_state_dict(torch.load(output_dir))                
+        
+        train_examples = read_examples(args.train_filename)
+        train_features = convert_examples_to_features(train_examples, tokenizer, args, stage='train')
+        train_dataset = MyDataset(train_features)
+        index = train_dataset.BuildIndex(retriever)
+        eval_examples = read_examples(args.test_filename)
+        eval_features = convert_examples_to_features(eval_examples, tokenizer, args, stage='dev')
+        eval_data = MyDataset(eval_features)
 
+        eval_sampler = SequentialSampler(eval_data)
+        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size,
+                                        collate_fn=DoNothingCollator)
+
+        logger.info("\n***** Running evaluation *****")
+        logger.info("  Num examples = %d", len(eval_examples))
+        logger.info("  Batch size = %d", args.eval_batch_size)
+        
+        retriever.eval()
+        generator.eval()
+        p=[]
+        for batch in eval_dataloader:
+            query = [feature.query_ids for feature in batch]
+            query = torch.tensor(query, dtype=torch.long).to(device)
+            query_vec = retriever(query)
+            query_vec_cpu = query_vec.detach().cpu().numpy()
+            i = index.search(query_vec_cpu, 1)
+            inputs = []
+            for no, feature in enumerate(batch):
+                relevant = train_dataset.features[i[no][0]]
+                inputs.append(Cat2Input(feature.source_ids, relevant.target_ids, relevant.source_ids))
+            with torch.no_grad():
+                inputs = torch.tensor(inputs, dtype=torch.long).to(device)
+                preds = generator(inputs)
+                # convert ids to text
+                for pred in preds:
+                    t = pred[0].cpu().numpy()
+                    t = list(t)
+                    if 0 in t:
+                        t = t[:t.index(0)]
+                    text = tokenizer.decode(t,clean_up_tokenization_spaces=False)
+                    p.append(text)
+        generator.train()
+        retriever.train()
+        predictions = []
+        with open(args.output_dir+"/test.output",'w') as f, open(args.output_dir+"/test.gold",'w') as f1:
+            for ref,gold in zip(p,eval_examples):
+                predictions.append(str(gold.idx)+'\t'+ref)
+                f.write(str(gold.idx)+'\t'+ref+'\n')
+                f1.write(str(gold.idx)+'\t'+gold.target+'\n')     
+
+        (goldMap, predictionMap) = bleu.computeMaps(predictions, os.path.join(args.output_dir, "test.gold")) 
+        dev_bleu=round(bleu.bleuFromMaps(goldMap, predictionMap)[0],2)
+        logger.info("  %s = %s "%("bleu-4",str(dev_bleu)))
+        logger.info("  "+"*"*20)    
 
 if __name__ == '__main__':
     main()  

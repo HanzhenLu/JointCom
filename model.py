@@ -77,6 +77,8 @@ class Seq2Seq(nn.Module):
             # Flatten the tokens
             loss = loss_fct(shift_logit.view(-1, lm_logits.size(-1))[active_position],
                             shift_label[active_position])
+            if score is not None:
+                loss = loss * score[idx]
 
             if losses is None:
                 losses = loss
