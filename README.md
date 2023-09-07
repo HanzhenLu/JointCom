@@ -1,5 +1,7 @@
 # Retrieval-augmented-Code-Summarization
 
+The dataset comes from [JCSD](#https://github.com/xing-hu/TL-CodeSum)
+
 ## 0. Delete the duplicate datas in the dataset
 ```
 python process.py
@@ -48,3 +50,6 @@ python integrated_generator.py \
 	--num_train_epochs 10 \
 	--passage_number 4
 ```
+
+
+Hopefully, you will get a pretty good result, 23.67 in corpus level BLEU-4.
