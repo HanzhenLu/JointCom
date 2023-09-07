@@ -1,7 +1,6 @@
 from __future__ import absolute_import
 import os
 import sys
-import bleu
 import pickle
 import torch
 import json
@@ -18,6 +17,7 @@ from model import Seq2Seq, Retriever, DataBase
 from tqdm import tqdm, trange
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
 from torch.utils.data.distributed import DistributedSampler
+from nltk.translate.bleu_score import corpus_bleu
 
 from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
               RobertaConfig, RobertaModel, RobertaTokenizer)
@@ -405,15 +405,15 @@ def main():
                             p.append(text)
                 generator.train()
                 retriever.train()
-                predictions = []
+                predictions, refs = [], []
                 with open(args.output_dir+"/dev.output",'w') as f, open(args.output_dir+"/dev.gold",'w') as f1:
                     for ref,gold in zip(p,eval_examples):
-                        predictions.append(str(gold.idx)+'\t'+ref)
+                        predictions.append(ref.strip().split(' '))
+                        refs.append([gold.target.strip().split(' ')])
                         f.write(str(gold.idx)+'\t'+ref+'\n')
                         f1.write(str(gold.idx)+'\t'+gold.target+'\n')     
 
-                (goldMap, predictionMap) = bleu.computeMaps(predictions, os.path.join(args.output_dir, "dev.gold")) 
-                dev_bleu=round(bleu.bleuFromMaps(goldMap, predictionMap)[0],2)
+                dev_bleu=round(corpus_bleu(refs, predictions),4)
                 logger.info("  %s = %s "%("bleu-4",str(dev_bleu)))
                 logger.info("  "+"*"*20)    
                 if dev_bleu > best_bleu:
@@ -426,29 +426,33 @@ def main():
                         os.makedirs(output_dir)
                     model_to_save = generator.module if hasattr(generator, 'module') else generator  # Only save the model it-self
                     output_model_file = os.path.join(output_dir, "generator_model.bin")
+                    if os.path.exists(output_model_file):
+                        os.remove(output_model_file)
                     torch.save(model_to_save.state_dict(), output_model_file)
                     model_to_save = retriever.module if hasattr(retriever, 'module') else retriever  # Only save the model it-self
                     output_model_file = os.path.join(output_dir, "retriever_model.bin")
+                    if os.path.exists(output_model_file):
+                        os.remove(output_model_file)
                     torch.save(model_to_save.state_dict(), output_model_file)
                     patience =0
                 else:
                     patience += 1
-                    if patience == 4:
+                    if patience == 2:
                         break
                 
     if args.do_test:
-        checkpoint_prefix = 'checkpoint-best-bleu/generator_model.bin'
-        output_dir = os.path.join(args.output_dir, checkpoint_prefix)  
-        model_to_load = generator.module if hasattr(generator, 'module') else generator  
-        model_to_load.load_state_dict(torch.load(output_dir))                
-        
         checkpoint_prefix = 'checkpoint-best-bleu/retriever_model.bin'
         output_dir = os.path.join(args.output_dir, checkpoint_prefix)  
         model_to_load = retriever.module if hasattr(retriever, 'module') else retriever  
         model_to_load.load_state_dict(torch.load(output_dir))                
         
+        checkpoint_prefix = 'checkpoint-best-bleu/generator_model.bin'
+        output_dir = os.path.join(args.output_dir, checkpoint_prefix)  
+        model_to_load = generator.module if hasattr(generator, 'module') else generator  
+        model_to_load.load_state_dict(torch.load(output_dir))                
+        
         train_examples = read_examples(args.train_filename)
-        train_features = convert_examples_to_features(train_examples, tokenizer, args, stage='train')
+        train_features = convert_examples_to_features(train_examples, tokenizer, args)
         train_dataset = MyDataset(train_features)
         index = train_dataset.BuildIndex(retriever)
         eval_examples = read_examples(args.test_filename)
@@ -466,7 +470,7 @@ def main():
         retriever.eval()
         generator.eval()
         p=[]
-        for batch in eval_dataloader:
+        for batch in tqdm(eval_dataloader):
             query = [feature.query_ids for feature in batch]
             query = torch.tensor(query, dtype=torch.long).to(device)
             query_vec = retriever(query)
@@ -489,15 +493,15 @@ def main():
                     p.append(text)
         generator.train()
         retriever.train()
-        predictions = []
+        predictions, refs = [], []
         with open(args.output_dir+"/test.output",'w') as f, open(args.output_dir+"/test.gold",'w') as f1:
             for ref,gold in zip(p,eval_examples):
-                predictions.append(str(gold.idx)+'\t'+ref)
+                predictions.append(ref.strip().split(' '))
+                refs.append([gold.target.strip().split(' ')])
                 f.write(str(gold.idx)+'\t'+ref+'\n')
                 f1.write(str(gold.idx)+'\t'+gold.target+'\n')     
 
-        (goldMap, predictionMap) = bleu.computeMaps(predictions, os.path.join(args.output_dir, "test.gold")) 
-        dev_bleu=round(bleu.bleuFromMaps(goldMap, predictionMap)[0],2)
+        dev_bleu=round(corpus_bleu(refs, predictions),4)
         logger.info("  %s = %s "%("bleu-4",str(dev_bleu)))
         logger.info("  "+"*"*20)    
 
