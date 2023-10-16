@@ -5,7 +5,6 @@ import pickle
 import torch
 import json
 import copy
-import faiss
 import random
 import logging
 import argparse
@@ -25,7 +24,7 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
-os.environ["CUDA_VISIBLE_DEVICES"]="1,0"
+#os.environ["CUDA_VISIBLE_DEVICES"]="1,0"
 
 def set_seed(seed=42):
     random.seed(seed)
@@ -99,17 +98,6 @@ def convert_examples_to_features(examples, tokenizer, args, stage=None):
         else:
             target_tokens = tokenizer.tokenize(example.target)[:args.nl_length]         
         target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
-   
-        if example_index < 5:
-            if stage=='train':
-                logger.info("*** Example ***")
-                logger.info("idx: {}".format(example.idx))
-
-                logger.info("source_tokens: {}".format([x.replace('\u0120','_') for x in source_tokens]))
-                logger.info("source_ids: {}".format(' '.join(map(str, source_ids))))
-                
-                logger.info("target_tokens: {}".format([x.replace('\u0120','_') for x in target_tokens]))
-                logger.info("target_ids: {}".format(' '.join(map(str, target_ids))))
        
         features.append(
             InputFeatures(
@@ -495,10 +483,10 @@ def main():
         retriever.train()
         predictions, refs = [], []
         with open(args.output_dir+"/test.output",'w') as f, open(args.output_dir+"/test.gold",'w') as f1:
-            for ref,gold in zip(p,eval_examples):
-                predictions.append(ref.strip().split(' '))
+            for pred,gold in zip(p,eval_examples):
+                predictions.append(pred.strip().split(' '))
                 refs.append([gold.target.strip().split(' ')])
-                f.write(str(gold.idx)+'\t'+ref+'\n')
+                f.write(str(gold.idx)+'\t'+pred+'\n')
                 f1.write(str(gold.idx)+'\t'+gold.target+'\n')     
 
         dev_bleu=round(corpus_bleu(refs, predictions),4)

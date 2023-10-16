@@ -57,7 +57,7 @@ python run.py \
 	--passage_number 4
 ```
 
-## 2. Eval retriever and generator
+## 2. Generate predictions for test set
 ```
 # For go
 lang=go
@@ -81,3 +81,11 @@ python run.py \
 
 ```
 
+## 3. Evaluate the result
+```
+# You should use python2.7 to run the evaluation program
+# For go
+lang=go
+cd eval
+python evaluate.py $lang
+```
