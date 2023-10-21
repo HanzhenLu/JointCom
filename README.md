@@ -1,6 +1,6 @@
 # Retrieval-augmented-Code-Summarization
 
-The dataset comes from [CodeSearchNet](https://github.com/microsoft/CodeXGLUE/tree/main/Code-Text/code-to-text), [JCSD](https://github.com/xing-hu/TL-CodeSum) and PCSD(origin version is [code-docstring-corpus](https://github.com/EdinburghNLP/code-docstring-corpus), but for fair comparision we use filtered version provided by [DECOM](https://github.com/ase-decom/ASE22_DECOM/tree/master/dataset/PCSD))
+The dataset comes from [CodeSearchNet](https://github.com/microsoft/CodeXGLUE/tree/main/Code-Text/code-to-text), [JCSD](https://github.com/xing-hu/TL-CodeSum) provided by Microsoft and PCSD(origin version is [code-docstring-corpus](https://github.com/EdinburghNLP/code-docstring-corpus), but for fair comparision we use filtered version provided by [DECOM](https://github.com/ase-decom/ASE22_DECOM/tree/master/dataset/PCSD))
 
 ## 0. Data preprocess
 ```
@@ -84,8 +84,8 @@ python run.py \
 ## 3. Evaluate the result
 ```
 # You should use python2.7 to run the evaluation program
-# For go
-lang=go
+# Set the path as the dir containing test.output and test.gold
+path=saved_models/go
 cd eval
-python evaluate.py $lang
+python evaluate.py $path
 ```

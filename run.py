@@ -24,7 +24,7 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
-#os.environ["CUDA_VISIBLE_DEVICES"]="1,0"
+os.environ["CUDA_VISIBLE_DEVICES"]="1,0"
 
 def set_seed(seed=42):
     random.seed(seed)
