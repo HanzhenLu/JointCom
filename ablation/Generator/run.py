@@ -272,7 +272,7 @@ def main():
             for idx,batch in enumerate(train_dataloader):
                 batch = tuple(t.to(device) for t in batch)
                 source_ids,target_ids = batch
-                loss,_,_ = model(source_ids=source_ids,target_ids=target_ids)
+                loss = model(source_ids=source_ids,target_ids=target_ids)
 
                 if args.n_gpu > 1:
                     loss = loss.mean() # mean() to average on multi-gpu.
@@ -290,42 +290,7 @@ def main():
                         logger.info("epoch {} step {} loss {}".format(epoch,
                                                      len(losses)//args.gradient_accumulation_steps,
                                                      round(np.mean(losses[-100*args.gradient_accumulation_steps:]),4)))
-            if args.do_eval:
-                #Eval model with dev dataset                   
-                if 'dev_loss' in dev_dataset:
-                    eval_examples,eval_data = dev_dataset['dev_loss']
-                else:
-                    eval_examples = read_examples(args.dev_filename)
-                    eval_features = convert_examples_to_features(eval_examples, tokenizer, args,stage='dev')
-                    all_source_ids = torch.tensor([f.source_ids for f in eval_features], dtype=torch.long)
-                    all_target_ids = torch.tensor([f.target_ids for f in eval_features], dtype=torch.long)   
-                    eval_data = TensorDataset(all_source_ids,all_target_ids)   
-                    dev_dataset['dev_loss' ]= eval_examples,eval_data
-                eval_sampler = SequentialSampler(eval_data)
-                eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
-
-                logger.info("\n***** Running evaluation *****")
-                logger.info("  Num examples = %d", len(eval_examples))
-                logger.info("  Batch size = %d", args.eval_batch_size)
-
-                #Start Evaling model
-                model.eval()
-                eval_loss,tokens_num = 0,0
-                for batch in eval_dataloader:
-                    batch = tuple(t.to(device) for t in batch)
-                    source_ids,target_ids = batch                  
-
-                    with torch.no_grad():
-                        _,loss,num = model(source_ids=source_ids,target_ids=target_ids)     
-                    eval_loss += loss.sum().item()
-                    tokens_num += num.sum().item()
-                #Pring loss of dev dataset    
-                model.train()
-                eval_loss = eval_loss / tokens_num
-                result = {'eval_ppl': round(np.exp(eval_loss),5)}
-                for key in sorted(result.keys()):
-                    logger.info("  %s = %s", key, str(result[key]))
-                logger.info("  "+"*"*20)   
+            if args.do_eval:   
 
                 #Calculate bleu  
                 if 'dev_bleu' in dev_dataset:

@@ -1,4 +1,7 @@
 # 1. Training
+```
+# For JCSD
+lang=JCSD
 python run.py \
 	--do_train \
 	--do_eval \
@@ -14,11 +17,12 @@ python run.py \
 	--learning_rate 5e-5 \
 	--gradient_accumulation_steps 1 \
 	--num_train_epochs 10 
+```
 	
 # 2. Predicting	
 ```
-# For java
-lang=java
+# For JCSD
+lang=JCSD
 python run.py \
 	--do_test \
 	--model_name_or_path microsoft/unixcoder-base \

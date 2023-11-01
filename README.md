@@ -1,34 +1,9 @@
 # Retrieval-augmented-Code-Summarization
 
-The dataset comes from [CodeSearchNet](https://github.com/microsoft/CodeXGLUE/tree/main/Code-Text/code-to-text), [JCSD](https://github.com/xing-hu/TL-CodeSum) provided by Microsoft and PCSD(origin version is [code-docstring-corpus](https://github.com/EdinburghNLP/code-docstring-corpus), but for fair comparision we use filtered version provided by [DECOM](https://github.com/ase-decom/ASE22_DECOM/tree/master/dataset/PCSD))
+The dataset comes from [JCSD](https://github.com/xing-hu/TL-CodeSum) provided by Hu and PCSD(origin version is [code-docstring-corpus](https://github.com/EdinburghNLP/code-docstring-corpus), but for fair comparision we use filtered version provided by [DECOM](https://github.com/ase-decom/ASE22_DECOM/tree/master/dataset/PCSD))
 
 ## 0. Data preprocess
 ```
-# For CodeSearchNet
-wget https://github.com/microsoft/CodeXGLUE/raw/main/Code-Text/code-to-text/dataset.zip
-unzip dataset.zip
-rm dataset.zip
-cd dataset
-wget https://zenodo.org/record/7857872/files/python.zip
-wget https://zenodo.org/record/7857872/files/java.zip
-wget https://zenodo.org/record/7857872/files/ruby.zip
-wget https://zenodo.org/record/7857872/files/javascript.zip
-wget https://zenodo.org/record/7857872/files/go.zip
-wget https://zenodo.org/record/7857872/files/php.zip
-
-unzip python.zip
-unzip java.zip
-unzip ruby.zip
-unzip javascript.zip
-unzip go.zip
-unzip php.zip
-rm *.zip
-rm *.pkl
-
-python preprocess.py
-rm -r */final
-cd ..
-
 # For JCSD and PCSD
 python process.py
 ```
