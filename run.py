@@ -24,7 +24,6 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
-os.environ["CUDA_VISIBLE_DEVICES"]="1,0"
 
 def set_seed(seed=42):
     random.seed(seed)
@@ -200,6 +199,8 @@ def main():
                         help="Total number of training epochs to perform.") 
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed for initialization")
+    parser.add_argument('--GPU_ids', type=str, default='0',
+                        help="The ids of GPUs will be used")
     
     # print arguments
     args = parser.parse_args()
@@ -207,6 +208,7 @@ def main():
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',level=logging.INFO )
     # set device
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.GPU_ids
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args.n_gpu = torch.cuda.device_count()
     args.device = device
