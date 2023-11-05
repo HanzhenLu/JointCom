@@ -31,11 +31,6 @@ def main(hyp, ref):
 
     score_Meteor, scores_Meteor = Meteor().compute_score(gts, res)
     print("Meteor: "), score_Meteor
-    with open('Meteor_result.txt', 'w') as f:
-        for i in range(len(scores_Meteor)):
-            if scores_Meteor[i] == 0.0:
-                f.write(str({'idx':i, 'ref':gts[i], 'pred':res[i]}))
-                f.write('\n')
 
     score_Rouge, scores_Rouge = Rouge().compute_score(gts, res)
     print("Rouge: "), score_Rouge

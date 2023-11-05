@@ -10,8 +10,8 @@ python process.py
 
 ## 1. Train retriever and generator jointly
 ```
-# For go
-lang=go
+# For java
+lang=JCSD
 python run.py \
 	--do_train \
 	--do_eval \
@@ -34,8 +34,8 @@ python run.py \
 
 ## 2. Generate predictions for test set
 ```
-# For go
-lang=go
+# For java
+lang=JCSD
 python run.py \
 	--do_test \
 	--model_name_or_path microsoft/unixcoder-base \
@@ -60,7 +60,7 @@ python run.py \
 ```
 # You should use python2.7 to run the evaluation program
 # Set the path as the dir containing test.output and test.gold
-path=saved_models/go
+path=saved_models/JCSD
 cd eval
 python evaluate.py $path
 ```

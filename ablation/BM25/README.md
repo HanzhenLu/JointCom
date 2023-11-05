@@ -1,7 +1,7 @@
 # 1. Train the generator
 ```
 # For java
-lang=java
+lang=JCSD
 python train_generator.py \
     --do_train \
     --do_eval \
@@ -22,7 +22,7 @@ python train_generator.py \
 # 2. Generate predictions for test set
 ```
 # For java
-lang=java
+lang=JCSD
 python train_generator.py \
     --do_test \
     --model_name_or_path microsoft/unixcoder-base \
@@ -39,6 +39,6 @@ python train_generator.py \
 # go to the dir containing evaluate.py
 cd ../../
 # Set the path as the dir containing test.output and test.gold
-path=ablation/Independence/saved_models/java
+path=ablation/BM25/saved_models/JCSD
 python evaluate.py $path
 ```
