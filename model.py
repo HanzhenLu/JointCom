@@ -92,8 +92,7 @@ class Seq2Seq(nn.Module):
         encoder_output = self.encoder(source_ids,attention_mask=mask,use_cache=True)        
         preds = []       
         zero = torch.cuda.LongTensor(1).fill_(0)   
-        #source_len = list(source_ids.ne(1).sum(-1).cpu().numpy())
-        source_len = [len(x) for x in source_ids]
+        source_len = list(source_ids.ne(1).sum(-1).cpu().numpy())
         for i in range(source_ids.shape[0]):
             context = [[x[i:i+1,:,:source_len[i]].repeat(self.beam_size,1,1,1) for x in y] 
                      for y in encoder_output.past_key_values]

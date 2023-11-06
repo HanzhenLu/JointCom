@@ -1,10 +1,9 @@
 # Retrieval-augmented-Code-Summarization
 
-The dataset comes from [JCSD](https://github.com/xing-hu/TL-CodeSum) provided by Hu and PCSD(origin version is [code-docstring-corpus](https://github.com/EdinburghNLP/code-docstring-corpus), but for fair comparision we use filtered version provided by [DECOM](https://github.com/ase-decom/ASE22_DECOM/tree/master/dataset/PCSD))
+The dataset comes from [JCSD](https://github.com/xing-hu/TL-CodeSum) provided by Hu and [PCSD](https://github.com/EdinburghNLP/code-docstring-corpus). But for fair and convenient comparision we use filtered version of JCSD provided by [DECOM](https://github.com/ase-decom/ASE22_DECOM/tree/master/dataset/JCSD) and PCSD provided by [SG-Trans](https://github.com/shuzhenggao/SG-Trans/tree/master/python/data)
 
 ## 0. Data preprocess
 ```
-# For JCSD and PCSD
 python process.py
 ```
 
@@ -29,7 +28,8 @@ python run.py \
 	--learning_rate 5e-5 \
 	--gradient_accumulation_steps 4 \
 	--num_train_epochs 10 \
-	--passage_number 4
+	--passage_number 4 \
+	--GPU_ids 0,1
 ```
 
 ## 2. Generate predictions for test set
@@ -47,13 +47,8 @@ python run.py \
 	--code_length 256 \
 	--nl_length 64 \
 	--beam_size 10 \
-	--train_batch_size 24 \
 	--eval_batch_size 24 \
-	--learning_rate 5e-5 \
-	--gradient_accumulation_steps 4 \
-	--num_train_epochs 10 \
-	--passage_number 4
-
+	--GPU_ids 0,1
 ```
 
 ## 3. Evaluate the result
