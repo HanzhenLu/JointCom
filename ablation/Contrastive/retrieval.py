@@ -35,8 +35,11 @@ parser.add_argument("--retrieve_batch_size", default=256, type=int,
                     help="Batch size for retrieval.")
 parser.add_argument("--output_dir", default=None, type=str, required=True,
                     help="The output directory where the model predictions and checkpoints will be written.")
+parser.add_argument("--GPU_ids", default=None, type=str, 
+                    help="The ids of GPUs which will be used")
 args = parser.parse_args()
 
+os.environ['CUDA_VISIBLE_DEVICES']=args.GPU_ids
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 train_file_name = '../../dataset/{}/train.jsonl'.format(args.dataset)
 valid_file_name = '../../dataset/{}/valid.jsonl'.format(args.dataset)

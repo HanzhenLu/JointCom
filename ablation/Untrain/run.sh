@@ -1,15 +1,25 @@
-# For the impatient
-```
-# For JCSD
-# The first parameter is the target dataset
-# The sencond parameter is the GPU_ids you want to used
-bash run.sh JCSD 0,1
-```
-# For who want to know each steps
-## 1. Retrieve relevant code and comment
-```
-# For java
-lang=JCSD
+#!/bin/bash
+
+display(){
+    echo "===================="
+    echo $1
+    echo "====================" 
+}
+
+result(){
+    if [ $1 -eq 0 ];then
+        display "Finish"
+    else 
+        display "$2"
+        exit
+    fi 
+}
+
+display "Target Dataset is : $1"
+lang=$1
+display "GPUs are : $2"
+
+display "Start retrieval"
 python retrieval.py \
     --dataset $lang \
     --model_name_or_path microsoft/unixcoder-base \
@@ -17,13 +27,10 @@ python retrieval.py \
     --code_length 256 \
     --retrieve_batch_size 256 \
     --output_dir dataset \
-    --GPU_ids 0
-```
+    --GPU_ids $2
+result $? "Retrieval failed"
 
-## 2. Train the generator
-```
-# For java
-lang=java
+display "Start training generator"
 python train_generator.py \
     --do_train \
     --do_eval \
@@ -39,13 +46,10 @@ python train_generator.py \
     --learning_rate 5e-5 \
     --beam_size 10 \
     --num_train_epochs 10 \
-    --GPU_ids 0
-```
+    --GPU_ids $2
+result $? "Training generator failed"
 
-## 3. Generate predictions for test set
-```
-# For java
-lang=java
+display "Start prediction"
 python train_generator.py \
     --do_test \
     --model_name_or_path microsoft/unixcoder-base \
@@ -55,14 +59,5 @@ python train_generator.py \
     --max_target_length 64 \
     --train_batch_size 32 \
     --eval_batch_size 32 \
-    --GPU_ids 0
-```
-# Evaluate the result
-```
-# You should use python2.7 to run the evaluation program
-# go to the dir containing evaluate.py
-cd ../../
-# Set the path as the dir containing test.output and test.gold
-path=ablation/Independence/saved_models/java
-python evaluate.py $path
-```
+    --GPU_ids $2
+result $? "Predicting failed"
