@@ -22,42 +22,42 @@ using a masked language modeling (MLM) loss.
 from __future__ import absolute_import
 import os
 import sys
-from nltk.translate.bleu_score import corpus_bleu
 import torch
 import json
 import random
 import logging
 import argparse
 import numpy as np
+from nltk.translate.bleu_score import corpus_bleu
 from io import open
 from tqdm import tqdm
 from torch.utils.data import DataLoader, SequentialSampler, RandomSampler,TensorDataset
-
 from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
               RobertaConfig, RobertaModel, RobertaTokenizer)
-
 # Import model
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_path = os.path.dirname(current_path)
 grandpa_path = os.path.dirname(parent_path)
 sys.path.append(grandpa_path)
 from model import Seq2Seq
-
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
-
 class Example(object):
     """A single training/test example."""
     def __init__(self,
                  idx,
                  source,
                  target,
+                 similar_code,
+                 similar_comment,
                  ):
         self.idx = idx
         self.source = source
         self.target = target
+        self.similar_code = similar_code
+        self.similar_comment = similar_comment
 
 def read_examples(filename):
     """Read examples from filename."""
@@ -68,15 +68,13 @@ def read_examples(filename):
             js = json.loads(line)
             if 'idx' not in js:
                 js['idx']=idx
-            code = ' '.join(js['code_tokens']).replace('\n',' ')
-            code = ' '.join(code.strip().split())
-            nl = ' '.join(js['docstring_tokens']).replace('\n','')
-            nl = ' '.join(nl.strip().split())            
             examples.append(
                 Example(
                         idx = idx,
-                        source = code,
-                        target = nl,
+                        source = js['source_code'],
+                        target = js['source_comment'],
+                        similar_code=js['similar_code'],
+                        similar_comment=js['similar_comment']
                         ) 
             )
     return examples
@@ -98,8 +96,8 @@ def convert_examples_to_features(examples, tokenizer, args,stage=None):
     features = []
     for example_index, example in enumerate(examples):
         #source
-        source_tokens = tokenizer.tokenize(example.source)[:args.max_source_length-5]
-        source_tokens = [tokenizer.cls_token,"<encoder-decoder>",tokenizer.sep_token,"<mask0>"]+source_tokens+[tokenizer.sep_token]
+        source_tokens = tokenizer.tokenize(example.source)+[tokenizer.sep_token]+tokenizer.tokenize(example.similar_comment)+[tokenizer.sep_token]+tokenizer.tokenize(example.similar_code)
+        source_tokens = [tokenizer.cls_token,"<encoder-decoder>",tokenizer.sep_token,"<mask0>"]+source_tokens[:args.max_source_length-5]+[tokenizer.sep_token]
         source_ids = tokenizer.convert_tokens_to_ids(source_tokens) 
         padding_length = args.max_source_length - len(source_ids)
         source_ids += [tokenizer.pad_token_id]*padding_length
@@ -113,17 +111,6 @@ def convert_examples_to_features(examples, tokenizer, args,stage=None):
         target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
         padding_length = args.max_target_length - len(target_ids)
         target_ids += [tokenizer.pad_token_id] * padding_length
-   
-        if example_index < 5:
-            if stage=='train':
-                logger.info("*** Example ***")
-                logger.info("idx: {}".format(example.idx))
-
-                logger.info("source_tokens: {}".format([x.replace('\u0120','_') for x in source_tokens]))
-                logger.info("source_ids: {}".format(' '.join(map(str, source_ids))))
-                
-                logger.info("target_tokens: {}".format([x.replace('\u0120','_') for x in target_tokens]))
-                logger.info("target_ids: {}".format(' '.join(map(str, target_ids))))
        
         features.append(
             InputFeatures(
@@ -289,7 +276,11 @@ def main():
                         logger.info("epoch {} step {} loss {}".format(epoch,
                                                      len(losses)//args.gradient_accumulation_steps,
                                                      round(np.mean(losses[-100*args.gradient_accumulation_steps:]),4)))
-            if args.do_eval:   
+            if args.do_eval:
+                #Eval model with dev dataset                   
+
+                logger.info("\n***** Running evaluation *****")
+                logger.info("  Batch size = %d", args.eval_batch_size)  
 
                 #Calculate bleu  
                 if 'dev_bleu' in dev_dataset:
@@ -337,11 +328,11 @@ def main():
                     logger.info("  "+"*"*20)
                     best_bleu = dev_bleu
                     # Save best checkpoint for best bleu
-                    output_dir = os.path.join(args.output_dir, 'checkpoint-best-bleu')
+                    output_dir = os.path.join(args.output_dir, 'checkpoint-best-result')
                     if not os.path.exists(output_dir):
                         os.makedirs(output_dir)
                     model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-                    output_model_file = os.path.join(output_dir, "pytorch_model.bin")
+                    output_model_file = os.path.join(output_dir, "generator.bin")
                     torch.save(model_to_save.state_dict(), output_model_file)
                     patience =0
                 else:
@@ -349,7 +340,7 @@ def main():
                     if patience ==2:
                         break
     if args.do_test:
-        checkpoint_prefix = 'checkpoint-best-bleu/pytorch_model.bin'
+        checkpoint_prefix = 'checkpoint-best-result/generator.bin'
         output_dir = os.path.join(args.output_dir, checkpoint_prefix)  
         model_to_load = model.module if hasattr(model, 'module') else model  
         model_to_load.load_state_dict(torch.load(output_dir))                

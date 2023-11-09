@@ -32,15 +32,10 @@ for phase in ['train', 'valid', 'test']:
         for line in tqdm(s):
             js = json.loads(line)
             code = ' '.join(js['code_tokens'])
-            result = database.top_k_sentence([token.lower() for token in js['code_tokens']], k=5)
-            train_flag = False
+            result = database.top_k_sentence([token.lower() for token in js['code_tokens']], k=2)
             for (_, index, _) in result:
                 if code != codes[index]:
-                    train_flag = True
                     break
-            if not train_flag:
-                print('there is too many repeted data in train set and {}'.format(phase))
-                exit(1)
             dic = {
                 'source_code':code.strip(),
                 'source_comment':' '.join(js['docstring_tokens']).strip(),
