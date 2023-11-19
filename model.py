@@ -253,14 +253,12 @@ class DataBase(object):
         
         index = []
         for i in range(len(sort_ids)):
-            index.append(sort_ids[i][0:number])
+            if stage == "train":
+                index.append(sort_ids[i][1:number+1])
+            else:
+                index.append(sort_ids[i][0:number])
         
         if stage == "train":
-            for line in index:
-                rand = line[0]
-                while rand == line[0]:
-                    rand = random.randint(0, self.vector.shape[0]-1)
-                line[0] = rand
             self.history.append(index)
                 
         return index

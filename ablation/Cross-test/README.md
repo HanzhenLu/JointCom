@@ -1,4 +1,4 @@
-# Test Untrain + Integrated_Generator
+# Test Generator_Retirever + Integrated_Generator
 '''
 lang=JCSD
 python predict.py \
