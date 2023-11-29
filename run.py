@@ -1,25 +1,19 @@
 from __future__ import absolute_import
 import os
-import sys
-import pickle
 import torch
 import json
-import copy
 import random
 import logging
 import argparse
 import numpy as np
 from io import open
-from itertools import cycle
 import torch.nn as nn
-from model import Seq2Seq, Retriever, DataBase
-from tqdm import tqdm, trange
+from model import DataBase, build_model
+from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
-from torch.utils.data.distributed import DistributedSampler
 from nltk.translate.bleu_score import corpus_bleu
 
-from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
-              RobertaConfig, RobertaModel, RobertaTokenizer)
+from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup)
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
@@ -79,15 +73,16 @@ class InputFeatures(object):
         self.target_ids = target_ids
         self.query_ids = query_ids 
         
-def convert_examples_to_features(examples, tokenizer, args, stage=None):
+def convert_examples_to_features(examples:Example, tokenizer, args, stage=None):
     """convert examples to token ids"""
     features = []
     for example_index, example in enumerate(examples):
         #source
-        source_tokens = tokenizer.tokenize(example.source)
-        query_tokens = [tokenizer.cls_token,"<encoder-only>",tokenizer.sep_token]+source_tokens[:args.code_length-4]+[tokenizer.sep_token]
-        query_ids = tokenizer.convert_tokens_to_ids(query_tokens)
+        source_str = example.source.replace('</s>', '<unk>')
+        source_tokens = tokenizer.tokenize(source_str)
         source_ids = tokenizer.convert_tokens_to_ids(source_tokens[:args.code_length]) 
+        query_tokens = [tokenizer.cls_token]+source_tokens[:args.code_length-2]+[tokenizer.eos_token]
+        query_ids = tokenizer.convert_tokens_to_ids(query_tokens)
         padding_length = args.code_length - len(query_ids)
         query_ids += [tokenizer.pad_token_id]*padding_length
  
@@ -95,7 +90,8 @@ def convert_examples_to_features(examples, tokenizer, args, stage=None):
         if stage=="test":
             target_tokens = tokenizer.tokenize("None")
         else:
-            target_tokens = tokenizer.tokenize(example.target)[:args.nl_length]         
+            target_str = example.target.replace('</s>', '<unk>')
+            target_tokens = tokenizer.tokenize(target_str)[:args.nl_length]         
         target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
        
         features.append(
@@ -131,7 +127,7 @@ class MyDataset(Dataset):
             retriever.eval()
             for batch in tqdm(dataloader):
                 code_inputs = torch.tensor(batch[0]).to(device)
-                code_vec = retriever(code_inputs=code_inputs)
+                code_vec = retriever(code_inputs)
                 query_vecs.append(code_vec.cpu().numpy())
             query_vecs = np.concatenate(query_vecs,0)
             index = DataBase(query_vecs)
@@ -222,18 +218,7 @@ def main():
         os.makedirs(args.output_dir)
 
     # build model
-    tokenizer = RobertaTokenizer.from_pretrained(args.model_name_or_path)
-    config = RobertaConfig.from_pretrained(args.model_name_or_path)
-    # import！！！you must set is_decoder as True for generation
-    config.is_decoder = True
-    encoder = RobertaModel.from_pretrained(args.model_name_or_path, config=config) 
-
-    generator = Seq2Seq(encoder=encoder, decoder=encoder,config=config,
-                  beam_size=args.beam_size,max_length=args.max_target_length,
-                  sos_id=tokenizer.convert_tokens_to_ids(["<mask0>"])[0], eos_id=tokenizer.sep_token_id)
-    
-    Rencoder = RobertaModel.from_pretrained(args.model_name_or_path) 
-    retriever = Retriever(Rencoder)
+    config, generator, retriever, tokenizer = build_model(args)
     
     logger.info("Training/evaluation parameters %s", args)
     generator.to(args.device)  
@@ -242,17 +227,18 @@ def main():
         generator = torch.nn.DataParallel(generator)
         retriever = torch.nn.DataParallel(retriever)  
         
-    prefix = tokenizer.convert_tokens_to_ids([tokenizer.cls_token,"<encoder-decoder>",tokenizer.sep_token,"<mask0>"])
-    prefix_ = tokenizer.convert_tokens_to_ids(["<mask0>"])
+    prefix = [tokenizer.cls_token_id]
     postfix = [tokenizer.sep_token_id]
+    sep = tokenizer.convert_tokens_to_ids(["\n", "#"])
+    sep_ = tokenizer.convert_tokens_to_ids(["\n"])
     def Cat2Input(code, similar_comment, similar_code):
-        input = code + postfix + similar_comment + postfix + similar_code
-        input = prefix + input[:args.max_source_length-5] + postfix
+        input = code + sep + similar_comment + sep_ + similar_code
+        input = prefix + input[:args.max_source_length-2] + postfix
         padding_length = args.max_source_length - len(input)
         input += padding_length * [tokenizer.pad_token_id]
         return input
     def Cat2Output(comment):
-        output = prefix_ + comment[:args.max_target_length-2] + postfix
+        output = prefix + comment[:args.max_target_length-2] + postfix
         padding_length = args.max_target_length - len(output)
         output += padding_length * [tokenizer.pad_token_id]
         return output
@@ -316,7 +302,11 @@ def main():
                         outputs.append(Cat2Output(feature.target_ids))
                 inputs = torch.tensor(inputs, dtype=torch.long).to(device)
                 outputs = torch.tensor(outputs, dtype=torch.long).to(device)
-                loss = generator(inputs, outputs, score)
+                source_mask = inputs.ne(tokenizer.pad_token_id)
+                target_mask = outputs.ne(tokenizer.pad_token_id)
+                results = generator(input_ids=inputs, attention_mask=source_mask,
+                                    labels=outputs, decoder_attention_mask=target_mask, score=score)
+                loss = results.loss
                 
                 if args.n_gpu > 1:
                     loss = loss.mean()
@@ -384,15 +374,13 @@ def main():
                         inputs.append(Cat2Input(feature.source_ids, relevant.target_ids, relevant.source_ids))
                     with torch.no_grad():
                         inputs = torch.tensor(inputs, dtype=torch.long).to(device)
-                        preds = generator(inputs)
-                        # convert ids to text
-                        for pred in preds:
-                            t = pred[0].cpu().numpy()
-                            t = list(t)
-                            if 0 in t:
-                                t = t[:t.index(0)]
-                            text = tokenizer.decode(t,clean_up_tokenization_spaces=False)
-                            p.append(text)
+                        source_mask = inputs.ne(tokenizer.pad_token_id)
+                        preds = generator(inputs,
+                                       attention_mask=source_mask,
+                                       is_generate=True)
+                        top_preds = list(preds.cpu().numpy())
+                        p.extend(top_preds)
+                p = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in p]
                 generator.train()
                 retriever.train()
                 predictions, refs = [], []
@@ -472,15 +460,13 @@ def main():
                 inputs.append(Cat2Input(feature.source_ids, relevant.target_ids, relevant.source_ids))
             with torch.no_grad():
                 inputs = torch.tensor(inputs, dtype=torch.long).to(device)
-                preds = generator(inputs)
-                # convert ids to text
-                for pred in preds:
-                    t = pred[0].cpu().numpy()
-                    t = list(t)
-                    if 0 in t:
-                        t = t[:t.index(0)]
-                    text = tokenizer.decode(t,clean_up_tokenization_spaces=False)
-                    p.append(text)
+                source_mask = inputs.ne(tokenizer.pad_token_id)
+                preds = generator(inputs,
+                                attention_mask=source_mask,
+                                is_generate=True)
+                top_preds = list(preds.cpu().numpy())
+                p.extend(top_preds)
+        p = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in p]
         generator.train()
         retriever.train()
         predictions, refs = [], []

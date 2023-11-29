@@ -3,242 +3,14 @@
 import torch.nn as nn
 import torch    
 import numpy as np
-import random
-class Retriever(nn.Module):   
-    def __init__(self, encoder):
-        super(Retriever, self).__init__()
-        self.encoder = encoder
-      
-    def forward(self, code_inputs=None, nl_inputs=None): 
-        if code_inputs is not None:
-            # self.encoder() return a BaseModelOutputWithPoolingAndCrossAttentions type data
-            # and 0 is the last hidden state
-            # 1 is the pooler_output
-            outputs = self.encoder(code_inputs,attention_mask=code_inputs.ne(1))[0]
-            outputs = (outputs*code_inputs.ne(1)[:,:,None]).sum(1)/code_inputs.ne(1).sum(-1)[:,None]
-            return torch.nn.functional.normalize(outputs, p=2, dim=1)
-        else:
-            outputs = self.encoder(nl_inputs,attention_mask=nl_inputs.ne(1))[0]
-            outputs = (outputs*nl_inputs.ne(1)[:,:,None]).sum(1)/nl_inputs.ne(1).sum(-1)[:,None]
-            return torch.nn.functional.normalize(outputs, p=2, dim=1)
+from transformers import (T5Config, T5ForConditionalGeneration, RobertaTokenizer)
+from transformers.models.t5.configuration_t5 import T5Config
+from transformers.models.t5.modeling_t5 import T5_INPUTS_DOCSTRING, _CONFIG_FOR_DOC
+from transformers.utils.doc import add_start_docstrings_to_model_forward, replace_return_docstrings
+from transformers.modeling_outputs import Seq2SeqLMOutput, BaseModelOutput
+from typing import Optional, Tuple, Union
+import logging
         
-class Seq2Seq(nn.Module):
-    """
-        Build Seqence-to-Sequence.
-        
-        Parameters:
-
-        * `encoder`- encoder of seq2seq model. e.g. roberta
-        * `decoder`- decoder of seq2seq model. e.g. transformer
-        * `config`- configuration of encoder model. 
-        * `beam_size`- beam size for beam search. 
-        * `max_length`- max length of target for beam search. 
-        * `sos_id`- start of symbol ids in target for beam search.
-        * `eos_id`- end of symbol ids in target for beam search. 
-    """
-    def __init__(self, encoder,decoder, config, beam_size=None, max_length=None, sos_id=None, eos_id=None):
-        super(Seq2Seq, self).__init__()
-        self.encoder = encoder
-        self.decoder=decoder
-        self.config=config
-        self.register_buffer(
-            "bias", torch.tril(torch.ones((1024, 1024), dtype=torch.uint8)).view(1,1024, 1024)
-        )
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.lm_head.weight = self.encoder.embeddings.word_embeddings.weight
-        self.lsm = nn.LogSoftmax(dim=-1)
-        
-        self.beam_size = beam_size
-        self.max_length = max_length
-        self.sos_id = sos_id
-        self.eos_id = eos_id       
-        
-    def forward(self, source_ids, target_ids=None, score=None):   
-        if target_ids is None:
-            return self.generate(source_ids)
-        
-        mask = source_ids.ne(1)[:,None,:]*source_ids.ne(1)[:,:,None]
-        encoder_output = self.encoder(source_ids,attention_mask=mask,use_cache=True)  
-        ids = torch.cat((source_ids,target_ids),-1)
-        mask = self.bias[:,source_ids.size(-1):ids.size(-1),:ids.size(-1)].bool()
-        mask = mask & ids[:,None,:].ne(1)
-
-        out = self.decoder(target_ids,attention_mask=mask,past_key_values=encoder_output.past_key_values).last_hidden_state
-        lm_logits = self.lm_head(out)
-        loss_fct = nn.CrossEntropyLoss(ignore_index=-1)
-        
-        # Calculate each input's loss
-        losses = None
-        for idx, (lm_logit, target_id) in enumerate(zip(lm_logits, target_ids)):
-            
-            # Shift so that tokens < n predict n
-            active_position = target_id[1:].ne(1).view(-1)
-            shift_logit = lm_logit[:-1, :].contiguous()
-            shift_label = target_id[1:].contiguous()
-            
-            # Flatten the tokens
-            loss = loss_fct(shift_logit.view(-1, lm_logits.size(-1))[active_position],
-                            shift_label[active_position])
-            if score is not None:
-                loss = loss * score[idx]
-
-            if losses is None:
-                losses = loss
-            else:
-                losses += loss
-        
-        return losses
-    
-    def generate(self, source_ids):
-        mask = source_ids.ne(1)[:,None,:]*source_ids.ne(1)[:,:,None]
-        encoder_output = self.encoder(source_ids,attention_mask=mask,use_cache=True)        
-        preds = []       
-        zero = torch.cuda.LongTensor(1).fill_(0)   
-        source_len = list(source_ids.ne(1).sum(-1).cpu().numpy())
-        for i in range(source_ids.shape[0]):
-            context = [[x[i:i+1,:,:source_len[i]].repeat(self.beam_size,1,1,1) for x in y] 
-                     for y in encoder_output.past_key_values]
-            beam = Beam(self.beam_size,self.sos_id,self.eos_id)
-            input_ids = beam.getCurrentState()
-            context_ids = source_ids[i:i+1,:source_len[i]].repeat(self.beam_size,1)
-            for _ in range(self.max_length): 
-                if beam.done():
-                    break
-
-                ids = torch.cat((context_ids,input_ids),-1)
-                mask = self.bias[:,context_ids.size(-1):ids.size(-1),:ids.size(-1)].bool()
-                mask = mask & ids[:,None,:].ne(1)
-                out = self.decoder(input_ids,attention_mask=mask,past_key_values=context).last_hidden_state
-                hidden_states = out[:,-1,:]
-                out = self.lsm(self.lm_head(hidden_states)).data
-                beam.advance(out)
-                input_ids.data.copy_(input_ids.data.index_select(0, beam.getCurrentOrigin()))
-                input_ids = torch.cat((input_ids,beam.getCurrentState()),-1)
-            hyp = beam.getHyp(beam.getFinal())
-            pred = beam.buildTargetTokens(hyp)[:self.beam_size]
-            pred = [torch.cat([x.view(-1) for x in p]+[zero]*(self.max_length-len(p))).view(1,-1) for p in pred]
-            preds.append(torch.cat(pred,0).unsqueeze(0))
-
-        preds = torch.cat(preds,0)    
-
-        return preds   
-        
-        
-
-class Beam(object):
-    def __init__(self, size,sos,eos):
-        self.size = size
-        self.tt = torch.cuda
-        # The score for each translation on the beam.
-        self.scores = self.tt.FloatTensor(size).zero_()
-        # The backpointers at each time-step.
-        self.prevKs = []
-        # The outputs at each time-step.
-        self.nextYs = [self.tt.LongTensor(size)
-                       .fill_(0)]
-        self.nextYs[0][0] = sos
-        # Has EOS topped the beam yet.
-        self._eos = eos
-        self.eosTop = False
-        # Time and k pair for finished.
-        self.finished = []
-
-    def getCurrentState(self):
-        "Get the outputs for the current timestep."
-        batch = self.tt.LongTensor(self.nextYs[-1]).view(-1, 1)
-        return batch
-
-    def getCurrentOrigin(self):
-        "Get the backpointers for the current timestep."
-        return self.prevKs[-1]
-
-    def advance(self, wordLk):
-        """
-        Given prob over words for every last beam `wordLk` and attention
-        `attnOut`: Compute and update the beam search.
-
-        Parameters:
-
-        * `wordLk`- probs of advancing from the last step (K x words)
-        * `attnOut`- attention at the last step
-
-        Returns: True if beam search is complete.
-        """
-        numWords = wordLk.size(1)
-
-        # Sum the previous scores.
-        if len(self.prevKs) > 0:
-            beamLk = wordLk + self.scores.unsqueeze(1).expand_as(wordLk)
-
-            # Don't let EOS have children.
-            for i in range(self.nextYs[-1].size(0)):
-                if self.nextYs[-1][i] == self._eos:
-                    beamLk[i] = -1e20
-        else:
-            beamLk = wordLk[0]
-        flatBeamLk = beamLk.view(-1)
-        bestScores, bestScoresId = flatBeamLk.topk(self.size, 0, True, True)
-
-        self.scores = bestScores
-
-        # bestScoresId is flattened beam x word array, so calculate which
-        # word and beam each score came from
-        prevK = bestScoresId // numWords
-        self.prevKs.append(prevK)
-        self.nextYs.append((bestScoresId - prevK * numWords))
-
-
-        for i in range(self.nextYs[-1].size(0)):
-            if self.nextYs[-1][i] == self._eos:
-                s = self.scores[i]
-                self.finished.append((s, len(self.nextYs) - 1, i))
-
-        # End condition is when top-of-beam is EOS and no global score.
-        if self.nextYs[-1][0] == self._eos:
-            self.eosTop = True
-
-    def done(self):
-        return self.eosTop and len(self.finished) >=self.size
-
-    def getFinal(self):
-        if len(self.finished) == 0:
-            self.finished.append((self.scores[0], len(self.nextYs) - 1, 0))
-        self.finished.sort(key=lambda a: -a[0])
-        if len(self.finished) != self.size:
-            unfinished=[]
-            for i in range(self.nextYs[-1].size(0)):
-                if self.nextYs[-1][i] != self._eos:
-                    s = self.scores[i]
-                    unfinished.append((s, len(self.nextYs) - 1, i)) 
-            unfinished.sort(key=lambda a: -a[0])
-            self.finished+=unfinished[:self.size-len(self.finished)]
-        return self.finished[:self.size]
-
-    def getHyp(self, beam_res):
-        """
-        Walk back to construct the full hypothesis.
-        """
-        hyps=[]
-        for _,timestep, k in beam_res:
-            hyp = []
-            for j in range(len(self.prevKs[:timestep]) - 1, -1, -1):
-                hyp.append(self.nextYs[j+1][k])
-                k = self.prevKs[j][k]
-            hyps.append(hyp[::-1])
-        return hyps
-    
-    def buildTargetTokens(self, preds):
-        sentence=[]
-        for pred in preds:
-            tokens = []
-            for tok in pred:
-                if tok==self._eos:
-                    break
-                tokens.append(tok)
-            sentence.append(tokens)
-        return sentence
-
 class DataBase(object):
     def __init__(self, vector) -> None:
         self.vector = vector
@@ -271,4 +43,232 @@ class DataBase(object):
     def update(self, index, vectors):
         for id, vector in zip(index, vectors):
             self.vector[id] = vector
+
+logger = logging.getLogger(__name__)
+
+MODEL_CLASSES = (T5Config, T5ForConditionalGeneration, RobertaTokenizer)
+
+def get_model_size(model):
+    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+    model_size = sum([np.prod(p.size()) for p in model_parameters])
+    return "{}M".format(round(model_size / 1e+6))
+
+
+def build_model(args):
+    config_class, model_class, tokenizer_class = MODEL_CLASSES
+    config = config_class.from_pretrained(args.model_name_or_path)
+    tokenizer = tokenizer_class.from_pretrained(args.model_name_or_path)
+
+    generator = Generator.from_pretrained(args.model_name_or_path)
+    generator._set(tokenizer, args.beam_size, args.max_target_length)
+    retriever = Retriever.from_pretrained(args.model_name_or_path)
+    retriever._set(tokenizer)
+    
+
+    logger.info("Finish loading generator [%s] from %s", get_model_size(generator), args.model_name_or_path)
+    logger.info("Finish loading retriever [%s] from %s", get_model_size(retriever), args.model_name_or_path)
+
+    return config, generator, retriever, tokenizer
+
+
+class Generator(T5ForConditionalGeneration):
+    def __init__(self, config: T5Config):
+        super().__init__(config)
+    
+    def _set(self, tokenizer:RobertaTokenizer, beam_size:int, max_length:int):
+        self.tokenizer = tokenizer
+        self.beam_size = beam_size
+        self.max_length = max_length
+    
+    @add_start_docstrings_to_model_forward(T5_INPUTS_DOCSTRING)
+    @replace_return_docstrings(output_type=Seq2SeqLMOutput, config_class=_CONFIG_FOR_DOC)
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        decoder_attention_mask: Optional[torch.BoolTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        decoder_head_mask: Optional[torch.FloatTensor] = None,
+        cross_attn_head_mask: Optional[torch.Tensor] = None,
+        encoder_outputs: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        score = None,
+        is_generate = False,
+    ) -> Union[Tuple[torch.FloatTensor], Seq2SeqLMOutput]:
+        r"""
+        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+            Labels for computing the sequence classification/regression loss. Indices should be in `[-100, 0, ...,
+            config.vocab_size - 1]`. All labels set to `-100` are ignored (masked), the loss is only computed for
+            labels in `[0, ..., config.vocab_size]`
+
+        Returns:
+
+        Examples:
+
+        ```python
+        >>> from transformers import AutoTokenizer, T5ForConditionalGeneration
+
+        >>> tokenizer = AutoTokenizer.from_pretrained("t5-small")
+        >>> model = T5ForConditionalGeneration.from_pretrained("t5-small")
+
+        >>> # training
+        >>> input_ids = tokenizer("The <extra_id_0> walks in <extra_id_1> park", return_tensors="pt").input_ids
+        >>> labels = tokenizer("<extra_id_0> cute dog <extra_id_1> the <extra_id_2>", return_tensors="pt").input_ids
+        >>> outputs = model(input_ids=input_ids, labels=labels)
+        >>> loss = outputs.loss
+        >>> logits = outputs.logits
+
+        >>> # inference
+        >>> input_ids = tokenizer(
+        ...     "summarize: studies have shown that owning a dog is good for you", return_tensors="pt"
+        ... ).input_ids  # Batch size 1
+        >>> outputs = model.generate(input_ids)
+        >>> print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+        >>> # studies have shown that owning a dog is good for you.
+        ```"""
+        
+        if is_generate:
+            preds = self.generate(input_ids,
+                                attention_mask=attention_mask,
+                                use_cache=True,
+                                num_beams=self.beam_size,
+                                early_stopping=True,
+                                max_length=self.max_length)
+            if preds.size(1) < self.max_length:
+                padding = torch.zeros((preds.size(0), self.max_length-preds.size(1)), dtype=preds.dtype).cuda()
+                preds = torch.cat([preds, padding], dim=1)
+            return preds
+        
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        # FutureWarning: head_mask was separated into two input args - head_mask, decoder_head_mask
+        if head_mask is not None and decoder_head_mask is None:
+            if self.config.num_layers == self.config.num_decoder_layers:
+                decoder_head_mask = head_mask
+
+        # Encode if needed (training, first prediction pass)
+        if encoder_outputs is None:
+            # Convert encoder inputs in embeddings if needed
+            encoder_outputs = self.encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                head_mask=head_mask,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+            )
+        elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
+            encoder_outputs = BaseModelOutput(
+                last_hidden_state=encoder_outputs[0],
+                hidden_states=encoder_outputs[1] if len(encoder_outputs) > 1 else None,
+                attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
+            )
+
+        hidden_states = encoder_outputs[0]
+
+        if self.model_parallel:
+            torch.cuda.set_device(self.decoder.first_device)
+
+        if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:
+            # get decoder inputs from shifting lm labels to the right
+            decoder_input_ids = self._shift_right(labels)
+
+        # Set device for model parallelism
+        if self.model_parallel:
+            torch.cuda.set_device(self.decoder.first_device)
+            hidden_states = hidden_states.to(self.decoder.first_device)
+            if decoder_input_ids is not None:
+                decoder_input_ids = decoder_input_ids.to(self.decoder.first_device)
+            if attention_mask is not None:
+                attention_mask = attention_mask.to(self.decoder.first_device)
+            if decoder_attention_mask is not None:
+                decoder_attention_mask = decoder_attention_mask.to(self.decoder.first_device)
+
+        # Decode
+        decoder_outputs = self.decoder(
+            input_ids=decoder_input_ids,
+            attention_mask=decoder_attention_mask,
+            inputs_embeds=decoder_inputs_embeds,
+            past_key_values=past_key_values,
+            encoder_hidden_states=hidden_states,
+            encoder_attention_mask=attention_mask,
+            head_mask=decoder_head_mask,
+            cross_attn_head_mask=cross_attn_head_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        sequence_output = decoder_outputs[0]
+
+        # Set device for model parallelism
+        if self.model_parallel:
+            torch.cuda.set_device(self.encoder.first_device)
+            self.lm_head = self.lm_head.to(self.encoder.first_device)
+            sequence_output = sequence_output.to(self.lm_head.weight.device)
+
+        if self.config.tie_word_embeddings:
+            # Rescale output before projecting on vocab
+            # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/transformer.py#L586
+            sequence_output = sequence_output * (self.model_dim**-0.5)
+
+        lm_logits = self.lm_head(sequence_output)
+
+        loss = None
+        if labels is not None:
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            # move labels to correct device to enable PP
+            labels = labels.to(lm_logits.device)
+            loss = None
+            for idx, (logit, label) in enumerate(zip(lm_logits, labels)):
+                _loss = loss_fct(logit.squeeze(), label.squeeze())
+                if score is not None:
+                    _loss = _loss * score[idx]
+
+                if loss is None:
+                    loss = _loss
+                else:
+                    loss += _loss
+                    
+        if not return_dict:
+            output = (lm_logits,) + decoder_outputs[1:] + encoder_outputs
+            return ((loss,) + output) if loss is not None else output
+
+        return Seq2SeqLMOutput(
+            loss=loss,
+            logits=lm_logits,
+            past_key_values=decoder_outputs.past_key_values,
+            decoder_hidden_states=decoder_outputs.hidden_states,
+            decoder_attentions=decoder_outputs.attentions,
+            cross_attentions=decoder_outputs.cross_attentions,
+            encoder_last_hidden_state=encoder_outputs.last_hidden_state,
+            encoder_hidden_states=encoder_outputs.hidden_states,
+            encoder_attentions=encoder_outputs.attentions,
+        )
+        
+class Retriever(T5ForConditionalGeneration):
+    def __init__(self, config: T5Config):
+        super().__init__(config)
+    
+    def _set(self, tokenizer:RobertaTokenizer):
+        self.tokenizer = tokenizer
+        # block the decoder to save memory
+        self.decoder = nn.Linear(2,1)
+    
+    def forward(self, input_ids:Optional[torch.LongTensor] = None):
+        attention_mask = input_ids.ne(self.tokenizer.pad_token_id)
+        encoder_outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        hidden_state = encoder_outputs.last_hidden_state[:,0,:]
+        return nn.functional.normalize(hidden_state,p=2,dim=1)
         
