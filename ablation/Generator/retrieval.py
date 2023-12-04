@@ -7,13 +7,12 @@ import logging
 import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset, SequentialSampler
-from transformers import (RobertaConfig, RobertaModel, RobertaTokenizer)  
 # Import model
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_path = os.path.dirname(current_path)
 grandpa_path = os.path.dirname(parent_path)
 sys.path.append(grandpa_path)
-from model import Retriever, Seq2Seq
+from model import build_model
 
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
@@ -47,16 +46,10 @@ batch_size = args.retrieve_batch_size
 logger.info('  ' + '*'*20)
 logger.info('begin loading parameters from pretrained')
 logger.info('  ' + '*'*20)
-tokenizer = RobertaTokenizer.from_pretrained(args.model_name_or_path)
-config = RobertaConfig.from_pretrained(args.model_name_or_path)
-encoder = RobertaModel.from_pretrained(args.model_name_or_path)
-
-temp = Seq2Seq(encoder=encoder, decoder=encoder, config=config)
-model_to_load = temp.module if hasattr(temp, 'module') else temp
-model_to_load.load_state_dict(torch.load('saved_models/{}/checkpoint-best-bleu/pytorch_model.bin'.format(args.dataset)))
-model=Retriever(model_to_load.encoder)
+_, _, model, tokenizer = build_model(args)
+model_to_load = model.module if hasattr(model, 'module') else model
+model_to_load.load_state_dict(torch.load('saved_models/{}/checkpoint-best-result/retriever.bin'.format(args.dataset)))
 model.to(device)
-del(temp)
 
 
 class InputFeatures(object):
@@ -112,8 +105,8 @@ def convert_examples_to_features(examples, tokenizer):
     features = []
     for example_index, example in enumerate(examples):
         #source
-        code_tokens = tokenizer.tokenize(example.source)[:args.code_length-4]
-        source_tokens = [tokenizer.cls_token,"<encoder-only>",tokenizer.sep_token]+code_tokens+[tokenizer.sep_token]
+        code_tokens = tokenizer.tokenize(example.source)[:args.code_length-2]
+        source_tokens = [tokenizer.cls_token]+code_tokens+[tokenizer.sep_token]
         
         source_ids =  tokenizer.convert_tokens_to_ids(source_tokens) 
         source_mask = [1] * (len(source_tokens))

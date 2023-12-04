@@ -1,24 +1,3 @@
-# coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
-# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""
-Fine-tuning the library models for language modeling on a text file (GPT, GPT-2, BERT, RoBERTa).
-GPT and GPT-2 are fine-tuned using a causal language modeling (CLM) loss while BERT and RoBERTa are fine-tuned
-using a masked language modeling (MLM) loss.
-"""
-
 from __future__ import absolute_import
 import os
 import sys
@@ -33,15 +12,14 @@ from io import open
 from tqdm import tqdm
 from torch.utils.data import DataLoader, SequentialSampler, RandomSampler,TensorDataset
 
-from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
-              RobertaConfig, RobertaModel, RobertaTokenizer)
+from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup)
 
 # Import model
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_path = os.path.dirname(current_path)
 grandpa_path = os.path.dirname(parent_path)
 sys.path.append(grandpa_path)
-from model import Seq2Seq
+from model import build_model
 
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
@@ -98,8 +76,8 @@ def convert_examples_to_features(examples, tokenizer, args,stage=None):
     features = []
     for example_index, example in enumerate(examples):
         #source
-        source_tokens = tokenizer.tokenize(example.source)[:args.max_source_length-5]
-        source_tokens = [tokenizer.cls_token,"<encoder-decoder>",tokenizer.sep_token,"<mask0>"]+source_tokens+[tokenizer.sep_token]
+        source_tokens = tokenizer.tokenize(example.source)[:args.max_source_length-2]
+        source_tokens = [tokenizer.cls_token]+source_tokens+[tokenizer.eos_token]
         source_ids = tokenizer.convert_tokens_to_ids(source_tokens) 
         padding_length = args.max_source_length - len(source_ids)
         source_ids += [tokenizer.pad_token_id]*padding_length
@@ -109,21 +87,10 @@ def convert_examples_to_features(examples, tokenizer, args,stage=None):
             target_tokens = tokenizer.tokenize("None")
         else:
             target_tokens = tokenizer.tokenize(example.target)[:args.max_target_length-2]
-        target_tokens = ["<mask0>"] + target_tokens + [tokenizer.sep_token]            
+        target_tokens = [tokenizer.cls_token] + target_tokens + [tokenizer.eos_token]            
         target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
         padding_length = args.max_target_length - len(target_ids)
         target_ids += [tokenizer.pad_token_id] * padding_length
-   
-        if example_index < 5:
-            if stage=='train':
-                logger.info("*** Example ***")
-                logger.info("idx: {}".format(example.idx))
-
-                logger.info("source_tokens: {}".format([x.replace('\u0120','_') for x in source_tokens]))
-                logger.info("source_ids: {}".format(' '.join(map(str, source_ids))))
-                
-                logger.info("target_tokens: {}".format([x.replace('\u0120','_') for x in target_tokens]))
-                logger.info("target_ids: {}".format(' '.join(map(str, target_ids))))
        
         features.append(
             InputFeatures(
@@ -218,15 +185,7 @@ def main():
         os.makedirs(args.output_dir)
 
     # build model
-    tokenizer = RobertaTokenizer.from_pretrained(args.model_name_or_path)
-    config = RobertaConfig.from_pretrained(args.model_name_or_path)
-    # import！！！you must set is_decoder as True for generation
-    config.is_decoder = True
-    encoder = RobertaModel.from_pretrained(args.model_name_or_path,config=config) 
-
-    model = Seq2Seq(encoder=encoder,decoder=encoder,config=config,
-                  beam_size=args.beam_size,max_length=args.max_target_length,
-                  sos_id=tokenizer.convert_tokens_to_ids(["<mask0>"])[0],eos_id=tokenizer.sep_token_id)
+    _, model, _, tokenizer = build_model(args)
     
     logger.info("Training/evaluation parameters %s", args)
     model.to(args.device)   
@@ -270,8 +229,12 @@ def main():
         for epoch in range(args.num_train_epochs):
             for idx,batch in enumerate(train_dataloader):
                 batch = tuple(t.to(device) for t in batch)
-                source_ids,target_ids = batch
-                loss = model(source_ids=source_ids,target_ids=target_ids)
+                inputs, outputs = batch
+                source_mask = inputs.ne(tokenizer.pad_token_id)
+                target_mask = outputs.ne(tokenizer.pad_token_id)
+                results = model(input_ids=inputs, attention_mask=source_mask,
+                                    labels=outputs, decoder_attention_mask=target_mask)
+                loss = results.loss
 
                 if args.n_gpu > 1:
                     loss = loss.mean() # mean() to average on multi-gpu.
@@ -309,17 +272,16 @@ def main():
                 p=[]
                 for batch in eval_dataloader:
                     batch = tuple(t.to(device) for t in batch)
-                    source_ids = batch[0]                  
+                    source_ids = batch[0]
                     with torch.no_grad():
-                        preds = model(source_ids) 
-                        # convert ids to text
-                        for pred in preds:
-                            t = pred[0].cpu().numpy()
-                            t = list(t)
-                            if 0 in t:
-                                t = t[:t.index(0)]
-                            text = tokenizer.decode(t,clean_up_tokenization_spaces=False)
-                            p.append(text)
+                        inputs = source_ids
+                        source_mask = inputs.ne(tokenizer.pad_token_id)
+                        preds = model(inputs,
+                                       attention_mask=source_mask,
+                                       is_generate=True)
+                        top_preds = list(preds.cpu().numpy())
+                        p.extend(top_preds)
+                p = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in p]
                 model.train()
                 predictions, refs = [], []
                 with open(args.output_dir+"/dev.output",'w') as f, open(args.output_dir+"/dev.gold",'w') as f1:
@@ -369,16 +331,14 @@ def main():
             batch = tuple(t.to(device) for t in batch)
             source_ids = batch[0]                  
             with torch.no_grad():
-                preds = model(source_ids)   
-                # convert ids to text
-                for pred in preds:
-                    t = pred[0].cpu().numpy()
-                    t = list(t)
-                    if 0 in t:
-                        t = t[:t.index(0)]
-                    text = tokenizer.decode(t,clean_up_tokenization_spaces=False)
-                    p.append(text)
-                    
+                inputs = source_ids
+                source_mask = inputs.ne(tokenizer.pad_token_id)
+                preds = model(inputs,
+                                attention_mask=source_mask,
+                                is_generate=True)
+                top_preds = list(preds.cpu().numpy())
+                p.extend(top_preds)
+        p = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in p]            
         model.train()
         predictions, refs = [], []
         with open(args.output_dir+"/test.output",'w') as f, open(args.output_dir+"/test.gold",'w') as f1:

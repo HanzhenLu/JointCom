@@ -6,16 +6,13 @@ import json
 import logging
 import numpy as np
 from tqdm import tqdm
-from torch.nn import CrossEntropyLoss, MSELoss
-from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
-from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
-                          RobertaConfig, RobertaModel, RobertaTokenizer)  
+from torch.utils.data import DataLoader, Dataset, SequentialSampler 
 # Import model
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_path = os.path.dirname(current_path)
 grandpa_path = os.path.dirname(parent_path)
 sys.path.append(grandpa_path)
-from model import Retriever
+from model import build_model
 
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
@@ -49,10 +46,7 @@ batch_size = args.retrieve_batch_size
 logger.info('  ' + '*'*20)
 logger.info('begin loading parameters from pretrained')
 logger.info('  ' + '*'*20)
-tokenizer = RobertaTokenizer.from_pretrained(args.model_name_or_path)
-config = RobertaConfig.from_pretrained(args.model_name_or_path)
-model = RobertaModel.from_pretrained(args.model_name_or_path)
-model=Retriever(model)
+_, _, model, tokenizer = build_model(args)
 model.to(device)
 
 
@@ -109,8 +103,8 @@ def convert_examples_to_features(examples, tokenizer):
     features = []
     for example_index, example in enumerate(examples):
         #source
-        code_tokens = tokenizer.tokenize(example.source)[:args.code_length-4]
-        source_tokens = [tokenizer.cls_token,"<encoder-only>",tokenizer.sep_token]+code_tokens+[tokenizer.sep_token]
+        code_tokens = tokenizer.tokenize(example.source)[:args.code_length-2]
+        source_tokens = [tokenizer.cls_token]+code_tokens+[tokenizer.sep_token]
         
         source_ids =  tokenizer.convert_tokens_to_ids(source_tokens) 
         source_mask = [1] * (len(source_tokens))

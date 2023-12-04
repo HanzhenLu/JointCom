@@ -34,7 +34,7 @@ def split_word(word):
                 if condition1 or condition2:
                     if word != '':
                         words.append(word)
-                    word = ''
+                    word = char
                 else:
                     word += char
             

@@ -2,22 +2,20 @@ import sys
 import argparse
 import logging
 import os
-import pickle
 import random
 import torch
 import json
 import numpy as np
-from torch.nn import CrossEntropyLoss, MSELoss
-from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
-from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
-                              RobertaConfig, RobertaModel, RobertaTokenizer)
+from torch.nn import CrossEntropyLoss
+from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler
+from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup)
 
 # Import model
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_path = os.path.dirname(current_path)
 grandpa_path = os.path.dirname(parent_path)
 sys.path.append(grandpa_path)
-from model import Retriever
+from model import build_model
 
 logger = logging.getLogger(__name__)
 
@@ -248,12 +246,7 @@ def main():
     set_seed(args.seed)
 
     #build model
-    tokenizer = RobertaTokenizer.from_pretrained(args.model_name_or_path)
-    config = RobertaConfig.from_pretrained(args.model_name_or_path)
-    model = RobertaModel.from_pretrained(args.model_name_or_path) 
- 
-    
-    model = Retriever(model)
+    _, _, model, tokenizer = build_model(args)
     logger.info("Training/evaluation parameters %s", args)
     
     model.to(args.device)

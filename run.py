@@ -361,23 +361,23 @@ def main():
                 retriever.eval()
                 generator.eval()
                 p=[]
-                
-                for batch in eval_dataloader:
-                    query = [feature.query_ids for feature in batch]
-                    query = torch.tensor(query, dtype=torch.long).to(device)
-                    query_vec = retriever(query)
-                    query_vec_cpu = query_vec.detach().cpu().numpy()
-                    i = index.search(query_vec_cpu, 1)
-                    inputs = []
-                    for no, feature in enumerate(batch):
-                        relevant = train_dataset.features[i[no][0]]
-                        inputs.append(Cat2Input(feature.source_ids, relevant.target_ids, relevant.source_ids))
-                    with torch.no_grad():
+                with torch.no_grad():
+                    for batch in eval_dataloader:
+                        query = [feature.query_ids for feature in batch]
+                        query = torch.tensor(query, dtype=torch.long).to(device)
+                        query_vec = retriever(query)
+                        query_vec_cpu = query_vec.detach().cpu().numpy()
+                        i = index.search(query_vec_cpu, 1)
+                        inputs = []
+                        for no, feature in enumerate(batch):
+                            relevant = train_dataset.features[i[no][0]]
+                            inputs.append(Cat2Input(feature.source_ids, relevant.target_ids, relevant.source_ids))
+                        
                         inputs = torch.tensor(inputs, dtype=torch.long).to(device)
                         source_mask = inputs.ne(tokenizer.pad_token_id)
                         preds = generator(inputs,
-                                       attention_mask=source_mask,
-                                       is_generate=True)
+                                        attention_mask=source_mask,
+                                        is_generate=True)
                         top_preds = list(preds.cpu().numpy())
                         p.extend(top_preds)
                 p = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in p]

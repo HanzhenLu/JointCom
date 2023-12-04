@@ -27,25 +27,25 @@ display "Start training generator"
 python train_generator.py \
     --do_train \
     --do_eval \
-    --model_name_or_path microsoft/unixcoder-base \
+    --model_name_or_path Salesforce/codet5-base \
     --output_dir saved_models/$lang \
     --train_filename dataset/$lang/train.jsonl \
     --dev_filename dataset/$lang/valid.jsonl \
     --max_source_length 512 \
     --max_target_length 64 \
-    --train_batch_size 32 \
-    --eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
+    --train_batch_size 24 \
+    --eval_batch_size 12 \
+    --gradient_accumulation_steps 2 \
     --learning_rate 5e-5 \
     --beam_size 10 \
-    --num_train_epochs 10 \
+    --num_train_epochs 15 \
     --GPU_ids $2
 result $? "Training generator failed"
 
 display "Start prediction"
 python train_generator.py \
     --do_test \
-    --model_name_or_path microsoft/unixcoder-base \
+    --model_name_or_path Salesforce/codet5-base \
     --output_dir saved_models/$lang \
     --test_filename dataset/$lang/test.jsonl \
     --max_source_length 512 \
