@@ -168,21 +168,21 @@ with torch.no_grad():
     for batch in tqdm(train_dataloader):  
         code_inputs = batch[0].to(device)
         comment_inputs = batch[1].to(device)
-        code_vec = model(code_inputs=code_inputs)
-        comment_vec = model(nl_inputs=comment_inputs)
+        code_vec = model(code_inputs)
+        comment_vec = model(comment_inputs)
         train_vecs.append(code_vec.cpu().numpy())
         comment_vecs.append(comment_vec.cpu().numpy())
     
     logger.info('encode valid data')    
     for batch in tqdm(valid_dataloader):  
         code_inputs = batch[0].to(device)
-        code_vec = model(code_inputs=code_inputs) 
+        code_vec = model(code_inputs) 
         valid_vecs.append(code_vec.cpu().numpy()) 
     
     logger.info('encode tset data')        
     for batch in tqdm(test_dataloader):
         code_inputs = batch[0].to(device)
-        code_vec = model(code_inputs=code_inputs)
+        code_vec = model(code_inputs)
         test_vecs.append(code_vec.cpu().numpy())
 
 train_vecs = np.concatenate(train_vecs,0)

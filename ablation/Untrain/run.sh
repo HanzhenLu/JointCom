@@ -22,7 +22,7 @@ display "GPUs are : $2"
 display "Start retrieval"
 python retrieval.py \
     --dataset $lang \
-    --model_name_or_path microsoft/unixcoder-base \
+    --model_name_or_path Salesforce/codet5-base \
     --nl_length 128 \
     --code_length 256 \
     --retrieve_batch_size 256 \
@@ -34,7 +34,7 @@ display "Start training generator"
 python train_generator.py \
     --do_train \
     --do_eval \
-    --model_name_or_path microsoft/unixcoder-base \
+    --model_name_or_path Salesforce/codet5-base \
     --output_dir saved_models/$lang \
     --train_filename dataset/$lang/train.jsonl \
     --dev_filename dataset/$lang/valid.jsonl \
@@ -52,7 +52,7 @@ result $? "Training generator failed"
 display "Start prediction"
 python train_generator.py \
     --do_test \
-    --model_name_or_path microsoft/unixcoder-base \
+    --model_name_or_path Salesforce/codet5-base \
     --output_dir saved_models/$lang \
     --test_filename dataset/$lang/test.jsonl \
     --max_source_length 512 \

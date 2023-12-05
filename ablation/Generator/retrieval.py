@@ -46,9 +46,11 @@ batch_size = args.retrieve_batch_size
 logger.info('  ' + '*'*20)
 logger.info('begin loading parameters from pretrained')
 logger.info('  ' + '*'*20)
-_, _, model, tokenizer = build_model(args)
-model_to_load = model.module if hasattr(model, 'module') else model
-model_to_load.load_state_dict(torch.load('saved_models/{}/checkpoint-best-result/retriever.bin'.format(args.dataset)))
+_, generator, model, tokenizer = build_model(args)
+model_to_load = generator.module if hasattr(generator, 'module') else generator
+model_to_load.load_state_dict(torch.load('saved_models/{}/checkpoint-best-bleu/pytorch_model.bin'.format(args.dataset)))
+model.encoder = generator.encoder
+del(generator)
 model.to(device)
 
 
@@ -168,21 +170,21 @@ with torch.no_grad():
     for batch in tqdm(train_dataloader):  
         code_inputs = batch[0].to(device)
         comment_inputs = batch[1].to(device)
-        code_vec = model(code_inputs=code_inputs)
-        comment_vec = model(nl_inputs=comment_inputs)
+        code_vec = model(code_inputs)
+        comment_vec = model(comment_inputs)
         train_vecs.append(code_vec.cpu().numpy())
         comment_vecs.append(comment_vec.cpu().numpy())
     
     logger.info('encode valid data')    
     for batch in tqdm(valid_dataloader):  
         code_inputs = batch[0].to(device)
-        code_vec = model(code_inputs=code_inputs) 
+        code_vec = model(code_inputs) 
         valid_vecs.append(code_vec.cpu().numpy()) 
     
     logger.info('encode tset data')        
     for batch in tqdm(test_dataloader):
         code_inputs = batch[0].to(device)
-        code_vec = model(code_inputs=code_inputs)
+        code_vec = model(code_inputs)
         test_vecs.append(code_vec.cpu().numpy())
 
 train_vecs = np.concatenate(train_vecs,0)

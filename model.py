@@ -60,7 +60,16 @@ def build_model(args):
     tokenizer = tokenizer_class.from_pretrained(args.model_name_or_path)
 
     generator = Generator.from_pretrained(args.model_name_or_path)
-    generator._set(tokenizer, args.beam_size, args.max_target_length)
+    if hasattr(args, 'beam_size'):
+        beam_size = args.beam_size
+    else:
+        beam_size = 10
+    if hasattr(args, 'max_target_length'):
+        max_target_length = args.max_target_length
+    else:
+        max_target_length = 64
+        
+    generator._set(tokenizer, beam_size, max_target_length)
     retriever = Retriever.from_pretrained(args.model_name_or_path)
     retriever._set(tokenizer)
     
