@@ -197,14 +197,24 @@ def main():
                         help="random seed for initialization")
     parser.add_argument('--GPU_ids', type=str, default='0',
                         help="The ids of GPUs will be used")
-    parser.add_argument('--patience', type=int, default=2,
-                        help="Early stop in how many epochs")
     
     # print arguments
     args = parser.parse_args()
+    
+    # make dir if output_dir not exist
+    if os.path.exists(args.output_dir) is False:
+        os.makedirs(args.output_dir)
+    
     # set log
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',level=logging.INFO )
+    
+    logger_path = os.path.join(args.output_dir, 'train.log') if args.do_train else os.path.join(args.output_dir, 'test')
+    fh = logging.FileHandler(logger_path)
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s -   %(message)s')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
     # set device
     os.environ["CUDA_VISIBLE_DEVICES"]=args.GPU_ids
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -214,10 +224,6 @@ def main():
     
     # Set seed
     set_seed(args.seed)
-    
-    # make dir if output_dir not exist
-    if os.path.exists(args.output_dir) is False:
-        os.makedirs(args.output_dir)
 
     # build model
     config, generator, retriever, tokenizer = build_model(args)
@@ -414,11 +420,11 @@ def main():
                     if os.path.exists(output_model_file):
                         os.remove(output_model_file)
                     torch.save(model_to_save.state_dict(), output_model_file)
-                    patience =0
-                else:
-                    patience += 1
-                    if patience == args.patience:
-                        break
+                #     patience =0
+                # else:
+                #     patience += 1
+                #     if patience == args.patience:
+                #         break
                 
     if args.do_test:
         checkpoint_prefix = 'checkpoint-best-bleu/retriever_model.bin'

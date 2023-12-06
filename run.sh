@@ -34,8 +34,8 @@ python run.py \
 	--code_length 256 \
 	--nl_length 64 \
 	--beam_size 10 \
-	--train_batch_size 32 \
-	--eval_batch_size 48 \
+	--train_batch_size 24 \
+	--eval_batch_size 6 \
 	--learning_rate 5e-5 \
 	--gradient_accumulation_steps 4 \
 	--num_train_epochs 10 \
@@ -55,6 +55,6 @@ python run.py \
 	--code_length 256 \
 	--nl_length 64 \
 	--beam_size 10 \
-	--eval_batch_size 48 \
+	--eval_batch_size 32 \
 	--GPU_ids $2
 result $? "Prediction failed!"
