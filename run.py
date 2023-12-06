@@ -197,6 +197,8 @@ def main():
                         help="random seed for initialization")
     parser.add_argument('--GPU_ids', type=str, default='0',
                         help="The ids of GPUs will be used")
+    parser.add_argument('--patience', type=int, default=2,
+                        help="Early stop in how many epochs")
     
     # print arguments
     args = parser.parse_args()
@@ -415,7 +417,7 @@ def main():
                     patience =0
                 else:
                     patience += 1
-                    if patience == 2:
+                    if patience == args.patience:
                         break
                 
     if args.do_test:

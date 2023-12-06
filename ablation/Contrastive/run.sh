@@ -26,8 +26,8 @@ python train_retriever.py \
     --model_name_or_path Salesforce/codet5-base \
     --train_data_file ../../dataset/$lang/train.jsonl \
     --eval_data_file ../../dataset/$lang/valid.jsonl \
-    --train_batch_size 64 \
-    --eval_batch_size 64 \
+    --train_batch_size 32 \
+    --eval_batch_size 32 \
     --num_train_epochs 10 \
     --output_dir saved_models/$lang \
     --GPU_ids $2
@@ -39,7 +39,7 @@ python retrieval.py \
     --model_name_or_path Salesforce/codet5-base \
     --nl_length 128 \
     --code_length 256 \
-    --retrieve_batch_size 256 \
+    --retrieve_batch_size 64 \
     --output_dir dataset \
     --GPU_ids $2
 result $? "Retrieval failed"
@@ -54,9 +54,9 @@ python train_generator.py \
     --dev_filename dataset/$lang/valid.jsonl \
     --max_source_length 512 \
     --max_target_length 64 \
-    --train_batch_size 32 \
-    --eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
+    --train_batch_size 24 \
+    --eval_batch_size 6 \
+    --gradient_accumulation_steps 2 \
     --learning_rate 5e-5 \
     --beam_size 10 \
     --num_train_epochs 10 \
@@ -71,7 +71,6 @@ python train_generator.py \
     --test_filename dataset/$lang/test.jsonl \
     --max_source_length 512 \
     --max_target_length 64 \
-    --train_batch_size 32 \
-    --eval_batch_size 32\
+    --eval_batch_size 16\
     --GPU_ids $2
 result $? "Predicting failed"

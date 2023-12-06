@@ -115,8 +115,8 @@ def convert_examples_to_features(examples, tokenizer):
         source_mask+=[0]*padding_length
  
         #target
-        target_tokens = tokenizer.tokenize(example.target)[:args.nl_length-2]
-        target_tokens = [tokenizer.cls_token]+target_tokens+[tokenizer.sep_token]            
+        target_tokens = tokenizer.tokenize(example.target)[:args.nl_length-4]
+        target_tokens = [tokenizer.cls_token, 'comment', '\n']+target_tokens+[tokenizer.sep_token]            
         target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
         target_mask = [1] *len(target_ids)
         padding_length = args.nl_length - len(target_ids)
@@ -198,7 +198,7 @@ logger.info('write train data')
 train_scores = np.zeros((train_vecs.shape[0],2),dtype=float)
 train_sort_ids = np.zeros((train_vecs.shape[0],2),dtype=int)
 for i in tqdm(range(int((train_vecs.shape[0] / 5000) + 1))):
-    scores = np.matmul(train_vecs[i*5000:min(train_vecs.shape[0], (i+1)*5000), :], train_vecs.T)
+    scores = np.matmul(train_vecs[i*5000:min(train_vecs.shape[0], (i+1)*5000), :], comment_vecs.T)
     sort_ids = np.argsort(scores, axis=-1, kind='quicksort', order=None)[:,::-1]
     for j in range(len(sort_ids)):
         for k in range(2):
@@ -230,7 +230,7 @@ del(train_scores)
 logger.info('write valid data')
 valid_scores = np.zeros((valid_vecs.shape[0],1),dtype=float)
 valid_sort_ids = np.zeros((valid_vecs.shape[0],1),dtype=int)
-scores = np.matmul(valid_vecs, train_vecs.T)
+scores = np.matmul(valid_vecs, comment_vecs.T)
 sort_ids = np.argsort(scores, axis=-1, kind='quicksort', order=None)[:,::-1]
 for i in tqdm(range(len(sort_ids))):
     valid_scores[i][0]=scores[i][sort_ids[i][0]]
@@ -256,7 +256,7 @@ del(valid_scores)
 logger.info('write test data')
 test_scores = np.zeros((test_vecs.shape[0],1),dtype=float)
 test_sort_ids = np.zeros((test_vecs.shape[0],1),dtype=int)
-scores = np.matmul(test_vecs, train_vecs.T)
+scores = np.matmul(test_vecs, comment_vecs.T)
 sort_ids = np.argsort(scores, axis=-1, kind='quicksort', order=None)[:,::-1]
 for i in tqdm(range(len(sort_ids))):
     test_scores[i][0]=scores[i][sort_ids[i][0]]

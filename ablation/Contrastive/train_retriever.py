@@ -35,14 +35,14 @@ class InputFeatures(object):
         
 def convert_examples_to_features(js,tokenizer,args):
     """convert examples to token ids"""
-    code_tokens = tokenizer.tokenize(js['code'])[:args.code_length-4]
-    code_tokens =[tokenizer.cls_token,"<encoder-only>",tokenizer.sep_token]+code_tokens+[tokenizer.sep_token]
+    code_tokens = tokenizer.tokenize(js['code'])[:args.code_length-2]
+    code_tokens =[tokenizer.cls_token]+code_tokens+[tokenizer.sep_token]
     code_ids = tokenizer.convert_tokens_to_ids(code_tokens)
     padding_length = args.code_length - len(code_ids)
     code_ids += [tokenizer.pad_token_id]*padding_length
     
     nl_tokens = tokenizer.tokenize(js['docstring'])[:args.nl_length-4]
-    nl_tokens = [tokenizer.cls_token,"<encoder-only>",tokenizer.sep_token]+nl_tokens+[tokenizer.sep_token]
+    nl_tokens = [tokenizer.cls_token, 'comment', '\n']+nl_tokens+[tokenizer.sep_token]
     nl_ids = tokenizer.convert_tokens_to_ids(nl_tokens)
     padding_length = args.nl_length - len(nl_ids)
     nl_ids += [tokenizer.pad_token_id]*padding_length  
@@ -110,8 +110,8 @@ def train(args, model, tokenizer):
             code_inputs = batch[0].to(args.device)    
             nl_inputs = batch[1].to(args.device)
             #get code and nl vectors
-            code_vec = model(code_inputs=code_inputs)
-            nl_vec = model(nl_inputs=nl_inputs)
+            code_vec = model(code_inputs)
+            nl_vec = model(nl_inputs)
             
             #calculate scores and loss
             scores = torch.einsum("ab,cb->ac",nl_vec,code_vec)
@@ -174,8 +174,8 @@ def evaluate(args, model, tokenizer, file_name, eval_when_training=False):
             code_inputs = batch[0].to(args.device)
             nl_inputs = batch[1].to(args.device)
             #get code and nl vectors
-            code_vec = model(code_inputs=code_inputs)
-            nl_vec = model(nl_inputs=nl_inputs)
+            code_vec = model(code_inputs)
+            nl_vec = model(nl_inputs)
             
             #calculate scores and loss
             scores = torch.einsum("ab,cb->ac",nl_vec,code_vec)
