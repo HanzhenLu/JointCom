@@ -76,7 +76,6 @@ python train_generator.py \
     --test_filename dataset/$lang/test.jsonl \
     --max_source_length 512 \
     --max_target_length 64 \
-    --train_batch_size 32 \
-    --eval_batch_size 32 \
+    --eval_batch_size 16 \
     --GPU_ids $2
 result $? "Predicting failed"
