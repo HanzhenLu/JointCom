@@ -55,6 +55,6 @@ python run.py \
 	--code_length 256 \
 	--nl_length 64 \
 	--beam_size 10 \
-	--eval_batch_size 32 \
+	--eval_batch_size 16 \
 	--GPU_ids $2
 result $? "Prediction failed!"

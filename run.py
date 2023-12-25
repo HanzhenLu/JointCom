@@ -420,11 +420,11 @@ def main():
                     if os.path.exists(output_model_file):
                         os.remove(output_model_file)
                     torch.save(model_to_save.state_dict(), output_model_file)
-                #     patience =0
-                # else:
-                #     patience += 1
-                #     if patience == args.patience:
-                #         break
+                    patience =0
+                else:
+                    patience += 1
+                    if patience == 2:
+                        break
                 
     if args.do_test:
         checkpoint_prefix = 'checkpoint-best-bleu/retriever_model.bin'
