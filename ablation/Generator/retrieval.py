@@ -34,6 +34,8 @@ parser.add_argument("--output_dir", default=None, type=str, required=True,
                     help="The output directory where the model predictions and checkpoints will be written.")
 parser.add_argument("--GPU_ids", default=None, type=str, 
                     help="The ids of GPUs which will be used")
+parser.add_argument("--passage_number", default=4, type=int,
+                    help="the number of passages being retrieved back.")
 args = parser.parse_args()
 
 os.environ['CUDA_VISIBLE_DEVICES']=args.GPU_ids
@@ -197,13 +199,13 @@ if not os.path.exists(output_path):
     os.makedirs(output_path)
 
 logger.info('write train data')   
-train_scores = np.zeros((train_vecs.shape[0],2),dtype=float)
-train_sort_ids = np.zeros((train_vecs.shape[0],2),dtype=int)
+train_scores = np.zeros((train_vecs.shape[0], args.passage_number+1), dtype=float)
+train_sort_ids = np.zeros((train_vecs.shape[0], args.passage_number+1), dtype=int)
 for i in tqdm(range(int((train_vecs.shape[0] / 5000) + 1))):
     scores = np.matmul(train_vecs[i*5000:min(train_vecs.shape[0], (i+1)*5000), :], train_vecs.T)
     sort_ids = np.argsort(scores, axis=-1, kind='quicksort', order=None)[:,::-1]
     for j in range(len(sort_ids)):
-        for k in range(2):
+        for k in range(args.passage_number+1):
             train_scores[i*5000+j][k]=scores[j][sort_ids[j][k]]
             train_sort_ids[i*5000+j][k]=sort_ids[j][k]
     del(scores)
@@ -215,13 +217,13 @@ for i in range(len(train_dataset)):
     js['idx'] = i
     js['source_code'] = train_dataset.features[i].source_code
     js['source_comment'] = train_dataset.features[i].source_comment
-    number = 0
-    if(i == train_sort_ids[i][0]):
-        j = 1
-    else:
-        j = 0
-    js['similar_code'] = train_dataset.features[train_sort_ids[i][j]].source_code
-    js['similar_comment'] = train_dataset.features[train_sort_ids[i][j]].source_comment
+    count = 0
+    for j in range(args.passage_number):
+        if i == train_sort_ids[i][j]:
+            continue
+        js['similar_{}'.format(count)] = train_sort_ids[i][j]
+        js['score_{}'.format(count)] = train_scores[i][j]
+        count += 1
     string = json.dumps(js)
     train_output.write(string)
     train_output.write('\n')
@@ -230,13 +232,14 @@ del(train_sort_ids)
 del(train_scores)
 
 logger.info('write valid data')
-valid_scores = np.zeros((valid_vecs.shape[0],1),dtype=float)
-valid_sort_ids = np.zeros((valid_vecs.shape[0],1),dtype=int)
+valid_scores = np.zeros((valid_vecs.shape[0], args.passage_number), dtype=float)
+valid_sort_ids = np.zeros((valid_vecs.shape[0], args.passage_number), dtype=int)
 scores = np.matmul(valid_vecs, train_vecs.T)
 sort_ids = np.argsort(scores, axis=-1, kind='quicksort', order=None)[:,::-1]
 for i in tqdm(range(len(sort_ids))):
-    valid_scores[i][0]=scores[i][sort_ids[i][0]]
-    valid_sort_ids[i][0]=sort_ids[i][0]
+    for k in range(args.passage_number):
+        valid_scores[i][k]=scores[i][sort_ids[i][k]]
+        valid_sort_ids[i][k]=sort_ids[i][k]
 del(scores)
 del(sort_ids)
 
@@ -246,8 +249,9 @@ for i in range(len(valid_dataset)):
     js['idx'] = i
     js['source_code'] = valid_dataset.features[i].source_code
     js['source_comment'] = valid_dataset.features[i].source_comment
-    js['similar_code'] = train_dataset.features[valid_sort_ids[i][0]].source_code
-    js['similar_comment'] = train_dataset.features[valid_sort_ids[i][0]].source_comment
+    for j in range(args.passage_number):
+        js['similar_{}'.format(j)] = valid_sort_ids[i][j]
+        js['score_{}'.format(j)] = valid_scores[i][j]
     string = json.dumps(js)
     valid_output.write(string)
     valid_output.write('\n')
@@ -256,13 +260,14 @@ del(valid_sort_ids)
 del(valid_scores)
 
 logger.info('write test data')
-test_scores = np.zeros((test_vecs.shape[0],1),dtype=float)
-test_sort_ids = np.zeros((test_vecs.shape[0],1),dtype=int)
+test_scores = np.zeros((test_vecs.shape[0], args.passage_number),dtype=float)
+test_sort_ids = np.zeros((test_vecs.shape[0], args.passage_number),dtype=int)
 scores = np.matmul(test_vecs, train_vecs.T)
 sort_ids = np.argsort(scores, axis=-1, kind='quicksort', order=None)[:,::-1]
 for i in tqdm(range(len(sort_ids))):
-    test_scores[i][0]=scores[i][sort_ids[i][0]]
-    test_sort_ids[i][0]=sort_ids[i][0]
+    for j in range(args.passage_number):
+        test_scores[i][j]=scores[i][sort_ids[i][j]]
+        test_sort_ids[i][j]=sort_ids[i][j]
 del(scores)
 del(sort_ids)
 
@@ -272,9 +277,9 @@ for i in range(len(test_dataset)):
     js['idx'] = i
     js['source_code'] = test_dataset.features[i].source_code
     js['source_comment'] = test_dataset.features[i].source_comment
-    js['similar_code'] = train_dataset.features[test_sort_ids[i][0]].source_code
-    js['similar_comment'] = train_dataset.features[test_sort_ids[i][0]].source_comment
-    js['num'] = number
+    for j in range(args.passage_number):
+        js['similar_{}'.format(j)] = test_sort_ids[i][j]
+        js['score_{}'.format(j)] = test_scores[i][j]
     string = json.dumps(js)
     test_output.write(string)
     test_output.write('\n')

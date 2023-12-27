@@ -1,41 +1,46 @@
 from __future__ import absolute_import
 import os
-import sys
 import torch
 import json
 import random
 import logging
 import argparse
 import numpy as np
-from nltk.translate.bleu_score import corpus_bleu
 from io import open
+import torch.nn as nn
+from model import DataBase, build_model
 from tqdm import tqdm
-from torch.utils.data import DataLoader, SequentialSampler, RandomSampler,TensorDataset
+from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
+from nltk.translate.bleu_score import corpus_bleu
+
 from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup)
-# Import model
-current_path = os.path.dirname(os.path.abspath(__file__))
-parent_path = os.path.dirname(current_path)
-grandpa_path = os.path.dirname(parent_path)
-sys.path.append(grandpa_path)
-from model import build_model
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
+
+def set_seed(seed=42):
+    random.seed(seed)
+    os.environ['PYHTONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
 class Example(object):
     """A single training/test example."""
     def __init__(self,
                  idx,
                  source,
                  target,
-                 similar_code,
-                 similar_comment,
+                 similar,
+                 score
                  ):
         self.idx = idx
         self.source = source
         self.target = target
-        self.similar_code = similar_code
-        self.similar_comment = similar_comment
+        self.similar = similar
+        self.score = score
 
 def read_examples(filename):
     """Read examples from filename."""
@@ -46,17 +51,25 @@ def read_examples(filename):
             js = json.loads(line)
             if 'idx' not in js:
                 js['idx']=idx
+            code = ' '.join(js['code_tokens']).replace('\n',' ')
+            code = ' '.join(code.strip().split())
+            nl = ' '.join(js['docstring_tokens']).replace('\n','')
+            nl = ' '.join(nl.strip().split())
+            similar = []
+            score = []
+            for i in range(len(js) - 3):
+                similar.append(js['similar_{}'.format(i)])
+                score.append(js['score_{}'.format(i)])
             examples.append(
                 Example(
                         idx = idx,
-                        source = js['source_code'],
-                        target = js['source_comment'],
-                        similar_code=js['similar_code'],
-                        similar_comment=js['similar_comment']
+                        source = code,
+                        target = nl,
+                        similar = similar,
+                        score = score
                         ) 
             )
     return examples
-
 
 class InputFeatures(object):
     """A single training/test features for a example."""
@@ -64,50 +77,57 @@ class InputFeatures(object):
                  example_id,
                  source_ids,
                  target_ids,
+                 similar,
+                 score
     ):
         self.example_id = example_id
         self.source_ids = source_ids
-        self.target_ids = target_ids     
+        self.target_ids = target_ids
+        self.similar = similar,
+        self.score = score
         
-def convert_examples_to_features(examples, tokenizer, args,stage=None):
+def convert_examples_to_features(examples:Example, tokenizer, args, stage=None):
     """convert examples to token ids"""
     features = []
     for example_index, example in enumerate(examples):
         #source
-        source_tokens = tokenizer.tokenize(example.source)+['\n', '#']+tokenizer.tokenize(example.similar_comment)+['\n']+tokenizer.tokenize(example.similar_code)
-        source_tokens = [tokenizer.cls_token]+source_tokens[:args.max_source_length-2]+[tokenizer.eos_token]
-        source_ids = tokenizer.convert_tokens_to_ids(source_tokens)
-        padding_length = args.max_source_length - len(source_ids)
-        source_ids += [tokenizer.pad_token_id]*padding_length
+        source_str = example.source.replace('</s>', '<unk>')
+        source_tokens = tokenizer.tokenize(source_str)
+        source_ids = tokenizer.convert_tokens_to_ids(source_tokens[:args.code_length]) 
  
         #target
         if stage=="test":
             target_tokens = tokenizer.tokenize("None")
         else:
-            target_tokens = tokenizer.tokenize(example.target)[:args.max_target_length-2]
-        target_tokens = [tokenizer.cls_token] + target_tokens + [tokenizer.eos_token]            
+            target_str = example.target.replace('</s>', '<unk>')
+            target_tokens = tokenizer.tokenize(target_str)[:args.nl_length]         
         target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
-        padding_length = args.max_target_length - len(target_ids)
-        target_ids += [tokenizer.pad_token_id] * padding_length
        
         features.append(
             InputFeatures(
                  example_index,
                  source_ids,
                  target_ids,
+                 example.similar,
+                 example.score
             )
         )
     return features
 
+class MyDataset(Dataset):
+    def __init__(self, features) -> None:
+        super().__init__()
+        self.features = features
+    
+    def __len__(self) -> int:
+        return len(self.features)
+    
+    def __getitem__(self, index):
+        return self.features[index]
+    
+def DoNothingCollator(batch):
+    return batch
 
-
-def set_seed(seed=42):
-    random.seed(seed)
-    os.environ['PYHTONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
         
 def main():
     parser = argparse.ArgumentParser()
@@ -140,6 +160,13 @@ def main():
     parser.add_argument("--no_cuda", action='store_true',
                         help="Avoid using CUDA when available") 
     
+    parser.add_argument("--nl_length", default=128, type=int,
+                        help="Optional NL input sequence length after tokenization.")    
+    parser.add_argument("--code_length", default=256, type=int,
+                        help="Optional Code input sequence length after tokenization.")
+    parser.add_argument("--passage_number", default=5, type=int,
+                        help="the number of passages being retrieved back.")
+    
     parser.add_argument("--train_batch_size", default=8, type=int,
                         help="Batch size per GPU/CPU for training.")
     parser.add_argument("--eval_batch_size", default=8, type=int,
@@ -160,16 +187,28 @@ def main():
                         help="Total number of training epochs to perform.") 
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed for initialization")
-    parser.add_argument("--GPU_ids", default=None, type=str, 
-                    help="The ids of GPUs which will be used")
+    parser.add_argument('--GPU_ids', type=str, default='0',
+                        help="The ids of GPUs will be used")
     
     # print arguments
     args = parser.parse_args()
+    
+    # make dir if output_dir not exist
+    if os.path.exists(args.output_dir) is False:
+        os.makedirs(args.output_dir)
+    
     # set log
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',level=logging.INFO )
+    
+    logger_path = os.path.join(args.output_dir, 'train.log') if args.do_train else os.path.join(args.output_dir, 'test')
+    fh = logging.FileHandler(logger_path)
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s -   %(message)s')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
     # set device
-    os.environ['CUDA_VISIBLE_DEVICES']=args.GPU_ids
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.GPU_ids
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args.n_gpu = torch.cuda.device_count()
     args.device = device
@@ -177,72 +216,93 @@ def main():
     
     # Set seed
     set_seed(args.seed)
-    
-    # make dir if output_dir not exist
-    if os.path.exists(args.output_dir) is False:
-        os.makedirs(args.output_dir)
 
     # build model
-    _, model, _, tokenizer = build_model(args)
+    _, generator, _, tokenizer = build_model(args)
     
     logger.info("Training/evaluation parameters %s", args)
-    model.to(args.device)   
-    
+    generator.to(args.device)
     if args.n_gpu > 1:
-        # multi-gpu training
-        model = torch.nn.DataParallel(model)
-
+        generator = torch.nn.DataParallel(generator)
+        
+    prefix = [tokenizer.cls_token_id]
+    postfix = [tokenizer.sep_token_id]
+    sep = tokenizer.convert_tokens_to_ids(["\n", "#"])
+    sep_ = tokenizer.convert_tokens_to_ids(["\n"])
+    def Cat2Input(code, similar_comment, similar_code):
+        input = code + sep + similar_comment + sep_ + similar_code
+        input = prefix + input[:args.max_source_length-2] + postfix
+        padding_length = args.max_source_length - len(input)
+        input += padding_length * [tokenizer.pad_token_id]
+        return input
+    def Cat2Output(comment):
+        output = prefix + comment[:args.max_target_length-2] + postfix
+        padding_length = args.max_target_length - len(output)
+        output += padding_length * [tokenizer.pad_token_id]
+        return output
+    
     if args.do_train:
         # Prepare training data loader
         train_examples = read_examples(args.train_filename)
-        train_features = convert_examples_to_features(train_examples, tokenizer,args,stage='train')
-        all_source_ids = torch.tensor([f.source_ids for f in train_features], dtype=torch.long)
-        all_target_ids = torch.tensor([f.target_ids for f in train_features], dtype=torch.long) 
-        train_data = TensorDataset(all_source_ids,all_target_ids)
-        train_sampler = RandomSampler(train_data)
-        train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size // args.gradient_accumulation_steps)
-
-
-        # Prepare optimizer and schedule (linear warmup and decay)
+        train_features = convert_examples_to_features(train_examples, tokenizer, args, stage='train')
+        train_dataset = MyDataset(train_features)
+        train_sampler = RandomSampler(train_dataset)
+        train_dataloader = DataLoader(train_dataset, sampler=train_sampler, 
+                                      batch_size=args.train_batch_size // args.gradient_accumulation_steps, 
+                                      collate_fn=DoNothingCollator)
+        
+        # Prepare optimizer and schedule (linear warmup and decay) for generator
         no_decay = ['bias', 'LayerNorm.weight']
         optimizer_grouped_parameters = [
-            {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            {'params': [p for n, p in generator.named_parameters() if not any(nd in n for nd in no_decay)],
              'weight_decay': args.weight_decay},
-            {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+            {'params': [p for n, p in generator.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
         ]
         optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
         scheduler = get_linear_schedule_with_warmup(optimizer, 
                                                     num_warmup_steps=int(len(train_dataloader)*args.num_train_epochs*0.1),
                                                     num_training_steps=len(train_dataloader)*args.num_train_epochs)
-    
+        
         #Start training
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
         logger.info("  Batch size = %d", args.train_batch_size * args.gradient_accumulation_steps)
         logger.info("  Num epoch = %d", args.num_train_epochs)
         
-
-        model.train()
         patience, best_bleu, losses, dev_dataset = 0, 0, [], {}
+        
         for epoch in range(args.num_train_epochs):
-            for idx,batch in enumerate(train_dataloader):
-                batch = tuple(t.to(device) for t in batch)
-                inputs, outputs = batch
+            for idx, batch in enumerate(train_dataloader):
+                generator.train()
+                
+                # Cat the ids of code, relevant document to form the final input
+                inputs, outputs, scores = [], [], []
+                for no, feature in enumerate(batch):
+                    scores.append(feature.score)
+                    for j in feature.similar:
+                        relevant = train_dataset.features[j]
+                        inputs.append(Cat2Input(feature.source_ids, relevant.target_ids, relevant.source_ids))
+                        outputs.append(Cat2Output(feature.target_ids))
+                inputs = torch.tensor(inputs, dtype=torch.long).to(device)
+                outputs = torch.tensor(outputs, dtype=torch.long).to(device)
                 source_mask = inputs.ne(tokenizer.pad_token_id)
                 target_mask = outputs.ne(tokenizer.pad_token_id)
-                results = model(input_ids=inputs, attention_mask=source_mask,
-                                    labels=outputs, decoder_attention_mask=target_mask)
+                scores = torch.tensor(scores)
+                softmax = nn.Softmax(dim=-1)
+                score = softmax(score)
+                score = score.view(-1)
+                results = generator(input_ids=inputs, attention_mask=source_mask,
+                                    labels=outputs, decoder_attention_mask=target_mask, score=scores)
                 loss = results.loss
-
+                
                 if args.n_gpu > 1:
-                    loss = loss.mean() # mean() to average on multi-gpu.
+                    loss = loss.mean()
                 if args.gradient_accumulation_steps > 1:
                     loss = loss / args.gradient_accumulation_steps
-                    
                 losses.append(loss.item())
                 loss.backward()
                 if len(losses) % args.gradient_accumulation_steps == 0:
-                    #Update parameters
+                    # Update parameters
                     optimizer.step()
                     optimizer.zero_grad()
                     scheduler.step()
@@ -250,47 +310,48 @@ def main():
                         logger.info("epoch {} step {} loss {}".format(epoch,
                                                      len(losses)//args.gradient_accumulation_steps,
                                                      round(np.mean(losses[-100*args.gradient_accumulation_steps:]),4)))
+            
             if args.do_eval:
                 #Eval model with dev dataset                   
-
-                logger.info("\n***** Running evaluation *****")
-                logger.info("  Batch size = %d", args.eval_batch_size)  
-
-                #Calculate bleu  
                 if 'dev_bleu' in dev_dataset:
-                    eval_examples,eval_data=dev_dataset['dev_bleu']
+                    eval_examples,eval_data = dev_dataset['dev_bleu']
                 else:
                     eval_examples = read_examples(args.dev_filename)
-                    #eval_examples = random.sample(eval_examples,min(1000,len(eval_examples)))
-                    eval_features = convert_examples_to_features(eval_examples, tokenizer, args,stage='test')
-                    all_source_ids = torch.tensor([f.source_ids for f in eval_features], dtype=torch.long) 
-                    eval_data = TensorDataset(all_source_ids)   
-                    dev_dataset['dev_bleu'] = eval_examples,eval_data
-
+                    eval_features = convert_examples_to_features(eval_examples, tokenizer, args,stage='dev')
+                    eval_data = MyDataset(eval_features)
+                    dev_dataset = (eval_examples, eval_data)
                 eval_sampler = SequentialSampler(eval_data)
-                eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
+                eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size,
+                                             collate_fn=DoNothingCollator)
 
-                model.eval() 
+                logger.info("\n***** Running evaluation *****")
+                logger.info("  Num examples = %d", len(eval_examples))
+                logger.info("  Batch size = %d", args.eval_batch_size)
+                
+                generator.eval()
                 p=[]
-                for batch in eval_dataloader:
-                    batch = tuple(t.to(device) for t in batch)
-                    source_ids = batch[0]
-                    with torch.no_grad():
-                        inputs = source_ids
+                with torch.no_grad():
+                    for batch in eval_dataloader:
+                        inputs = []
+                        for no, feature in enumerate(batch):
+                            relevant = train_dataset.features[feature.similar[0]]
+                            inputs.append(Cat2Input(feature.source_ids, relevant.target_ids, relevant.source_ids))
+                        
+                        inputs = torch.tensor(inputs, dtype=torch.long).to(device)
                         source_mask = inputs.ne(tokenizer.pad_token_id)
-                        preds = model(inputs,
-                                       attention_mask=source_mask,
-                                       is_generate=True)
+                        preds = generator(inputs,
+                                        attention_mask=source_mask,
+                                        is_generate=True)
                         top_preds = list(preds.cpu().numpy())
                         p.extend(top_preds)
                 p = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in p]
-                model.train()
+                generator.train()
                 predictions, refs = [], []
                 with open(args.output_dir+"/dev.output",'w') as f, open(args.output_dir+"/dev.gold",'w') as f1:
-                    for pred,gold in zip(p,eval_examples):
-                        predictions.append(pred.strip().split(' '))
+                    for ref,gold in zip(p,eval_examples):
+                        predictions.append(ref.strip().split(' '))
                         refs.append([gold.target.strip().split(' ')])
-                        f.write(str(gold.idx)+'\t'+pred+'\n')
+                        f.write(str(gold.idx)+'\t'+ref+'\n')
                         f1.write(str(gold.idx)+'\t'+gold.target+'\n')     
 
                 dev_bleu=round(corpus_bleu(refs, predictions),4)
@@ -301,47 +362,59 @@ def main():
                     logger.info("  "+"*"*20)
                     best_bleu = dev_bleu
                     # Save best checkpoint for best bleu
-                    output_dir = os.path.join(args.output_dir, 'checkpoint-best-result')
+                    output_dir = os.path.join(args.output_dir, 'checkpoint-best-bleu')
                     if not os.path.exists(output_dir):
                         os.makedirs(output_dir)
-                    model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-                    output_model_file = os.path.join(output_dir, "generator.bin")
+                    model_to_save = generator.module if hasattr(generator, 'module') else generator  # Only save the model it-self
+                    output_model_file = os.path.join(output_dir, "generator_model.bin")
+                    if os.path.exists(output_model_file):
+                        os.remove(output_model_file)
                     torch.save(model_to_save.state_dict(), output_model_file)
                     patience =0
                 else:
-                    patience +=1
-                    if patience ==2:
+                    patience += 1
+                    if patience == 2:
                         break
-    if args.do_test:
-        checkpoint_prefix = 'checkpoint-best-result/generator.bin'
+                
+    if args.do_test:          
+        checkpoint_prefix = 'checkpoint-best-bleu/generator_model.bin'
         output_dir = os.path.join(args.output_dir, checkpoint_prefix)  
-        model_to_load = model.module if hasattr(model, 'module') else model  
+        model_to_load = generator.module if hasattr(generator, 'module') else generator  
         model_to_load.load_state_dict(torch.load(output_dir))                
-
+        
+        train_examples = read_examples(args.train_filename)
+        train_features = convert_examples_to_features(train_examples, tokenizer, args)
+        train_dataset = MyDataset(train_features)
         eval_examples = read_examples(args.test_filename)
-        eval_features = convert_examples_to_features(eval_examples, tokenizer, args,stage='test')
-        all_source_ids = torch.tensor([f.source_ids for f in eval_features], dtype=torch.long)
-        eval_data = TensorDataset(all_source_ids)   
+        eval_features = convert_examples_to_features(eval_examples, tokenizer, args, stage='dev')
+        eval_data = MyDataset(eval_features)
 
-        # Calculate bleu
         eval_sampler = SequentialSampler(eval_data)
-        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
+        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size,
+                                        collate_fn=DoNothingCollator)
 
-        model.eval() 
+        logger.info("\n***** Running evaluation *****")
+        logger.info("  Num examples = %d", len(eval_examples))
+        logger.info("  Batch size = %d", args.eval_batch_size)
+        
+        generator.eval()
         p=[]
-        for batch in tqdm(eval_dataloader,total=len(eval_dataloader)):
-            batch = tuple(t.to(device) for t in batch)
-            source_ids = batch[0]                  
-            with torch.no_grad():
-                inputs = source_ids
+        with torch.no_grad():
+            for batch in eval_dataloader:
+                inputs = []
+                for no, feature in enumerate(batch):
+                    relevant = train_dataset.features[feature.similar[0]]
+                    inputs.append(Cat2Input(feature.source_ids, relevant.target_ids, relevant.source_ids))
+                
+                inputs = torch.tensor(inputs, dtype=torch.long).to(device)
                 source_mask = inputs.ne(tokenizer.pad_token_id)
-                preds = model(inputs,
+                preds = generator(inputs,
                                 attention_mask=source_mask,
                                 is_generate=True)
                 top_preds = list(preds.cpu().numpy())
                 p.extend(top_preds)
-        p = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in p]            
-        model.train()
+        p = [tokenizer.decode(id, skip_special_tokens=True, clean_up_tokenization_spaces=False) for id in p]
+        generator.train()
         predictions, refs = [], []
         with open(args.output_dir+"/test.output",'w') as f, open(args.output_dir+"/test.gold",'w') as f1:
             for pred,gold in zip(p,eval_examples):
@@ -350,11 +423,9 @@ def main():
                 f.write(str(gold.idx)+'\t'+pred+'\n')
                 f1.write(str(gold.idx)+'\t'+gold.target+'\n')     
 
-        dev_bleu = round(corpus_bleu(refs, predictions),4)
+        dev_bleu=round(corpus_bleu(refs, predictions),4)
         logger.info("  %s = %s "%("bleu-4",str(dev_bleu)))
         logger.info("  "+"*"*20)    
 
-                
-if __name__ == "__main__":
-    main()
-
+if __name__ == '__main__':
+    main()  
