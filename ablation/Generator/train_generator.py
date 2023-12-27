@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 import os
+import sys
 import torch
 import json
 import random
@@ -8,6 +9,11 @@ import argparse
 import numpy as np
 from io import open
 import torch.nn as nn
+# Import model
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_path = os.path.dirname(current_path)
+grandpa_path = os.path.dirname(parent_path)
+sys.path.append(grandpa_path)
 from model import DataBase, build_model
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
