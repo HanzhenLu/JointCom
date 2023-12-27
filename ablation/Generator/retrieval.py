@@ -221,8 +221,8 @@ for i in range(len(train_dataset)):
     for j in range(args.passage_number):
         if i == train_sort_ids[i][j]:
             continue
-        js['similar_{}'.format(count)] = train_sort_ids[i][j]
-        js['score_{}'.format(count)] = train_scores[i][j]
+        js['similar_{}'.format(count)] = train_sort_ids[i][j].item()
+        js['score_{}'.format(count)] = train_scores[i][j].item()
         count += 1
     string = json.dumps(js)
     train_output.write(string)
@@ -250,8 +250,8 @@ for i in range(len(valid_dataset)):
     js['source_code'] = valid_dataset.features[i].source_code
     js['source_comment'] = valid_dataset.features[i].source_comment
     for j in range(args.passage_number):
-        js['similar_{}'.format(j)] = valid_sort_ids[i][j]
-        js['score_{}'.format(j)] = valid_scores[i][j]
+        js['similar_{}'.format(j)] = valid_sort_ids[i][j].item()
+        js['score_{}'.format(j)] = valid_scores[i][j].item()
     string = json.dumps(js)
     valid_output.write(string)
     valid_output.write('\n')
@@ -278,8 +278,8 @@ for i in range(len(test_dataset)):
     js['source_code'] = test_dataset.features[i].source_code
     js['source_comment'] = test_dataset.features[i].source_comment
     for j in range(args.passage_number):
-        js['similar_{}'.format(j)] = test_sort_ids[i][j]
-        js['score_{}'.format(j)] = test_scores[i][j]
+        js['similar_{}'.format(j)] = test_sort_ids[i][j].item()
+        js['score_{}'.format(j)] = test_scores[i][j].item()
     string = json.dumps(js)
     test_output.write(string)
     test_output.write('\n')
