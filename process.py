@@ -52,7 +52,7 @@ if __name__ == '__main__':
     print('start to process JCSD')
     print('*'*20)
     phase = ['train', 'valid', 'test']
-    database = []
+    database = set()
     for n in phase:
         code_path = './dataset/JCSD/{}/source.code'.format(n)
         nl_path = './dataset/JCSD/{}/source.comment'.format(n)
@@ -60,6 +60,10 @@ if __name__ == '__main__':
         count = 0
         with open(code_path, 'r') as codes, open(nl_path, 'r') as nls, open(write_path, 'w') as file:
             for code, nl in tqdm(zip(codes, nls)):
+                if code.strip() in database:
+                    continue
+                if n == 'train':
+                    database.add(code.strip())
                 code = code.strip().split(' ')
                 nl = nl.strip().split(' ')
                 line = {
@@ -76,7 +80,7 @@ if __name__ == '__main__':
     print('*'*20)
     print('start to process PCSD')
     print('*'*20)
-    database = []
+    database = set()
     phase = ['train', 'dev', 'test']
     for n in phase:
         code_path = './dataset/PCSD/{}_originalcode'.format(n)
@@ -97,16 +101,16 @@ if __name__ == '__main__':
                         split = split_word(token.string)
                         for i in split:
                             sub_tokens.append(i.lower())
-                processed_code = ' '.join(sub_tokens).split()
-                nl = nl.strip().split()
+                processed_code = ' '.join(sub_tokens)
+                code_tokens = processed_code.split()
+                nl_tokens = nl.strip().split()
+                if processed_code in database:
+                    continue
                 if n == 'train':
-                    database.append(processed_code)
-                elif n == 'test':
-                    if processed_code in database:
-                        continue
+                    database.add(processed_code)
                 line = {
-                    'code_tokens':processed_code,
-                    'docstring_tokens':nl
+                    'code_tokens':code_tokens,
+                    'docstring_tokens':nl_tokens
                 }
                 line = json.dumps(line)
                 file.write(line)
