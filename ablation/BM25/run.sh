@@ -17,15 +17,15 @@ result(){
 
 display "Target Dataset is : $1"
 lang=$1
-number=5
+number=1
 display "GPUs are : $2"
 
-display "Start retrieval"
-python retrieval.py ${lang} ${number}
-result $? "Retrieval failed"
+# display "Start retrieval"
+# python retrieval.py ${lang} ${number}
+# result $? "Retrieval failed"
 
 display "Start training!"
-python run.py \
+python train_generator.py \
 	--do_train \
 	--do_eval \
 	--model_name_or_path Salesforce/codet5-base \

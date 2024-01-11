@@ -57,15 +57,15 @@ def read_examples(filename):
             js = json.loads(line)
             if 'idx' not in js:
                 js['idx']=idx
-            code = ' '.join(js['code_tokens']).replace('\n',' ')
+            code = js['source_code'].replace('\n',' ')
             code = ' '.join(code.strip().split())
-            nl = ' '.join(js['docstring_tokens']).replace('\n','')
+            nl = js['source_comment'].replace('\n','')
             nl = ' '.join(nl.strip().split())
             similar = []
             score = []
-            for i in range(len(js) - 3):
-                similar.append(js['similar_{}'.format(i)])
-                score.append(js['score_{}'.format(i)])
+            for i in range(int((len(js) - 3)/2)):
+                similar.append(int(js['similar_{}'.format(i)]))
+                score.append(float(js['score_{}'.format(i)]))
             examples.append(
                 Example(
                         idx = idx,
@@ -89,7 +89,7 @@ class InputFeatures(object):
         self.example_id = example_id
         self.source_ids = source_ids
         self.target_ids = target_ids
-        self.similar = similar,
+        self.similar = similar
         self.score = score
         
 def convert_examples_to_features(examples:Example, tokenizer, args, stage=None):
@@ -114,8 +114,8 @@ def convert_examples_to_features(examples:Example, tokenizer, args, stage=None):
                  example_index,
                  source_ids,
                  target_ids,
-                 example.similar,
-                 example.score
+                 example.similar[:args.passage_number],
+                 example.score[:args.passage_number]
             )
         )
     return features
@@ -293,12 +293,16 @@ def main():
                 outputs = torch.tensor(outputs, dtype=torch.long).to(device)
                 source_mask = inputs.ne(tokenizer.pad_token_id)
                 target_mask = outputs.ne(tokenizer.pad_token_id)
-                scores = torch.tensor(scores)
-                softmax = nn.Softmax(dim=-1)
-                score = softmax(score)
-                score = score.view(-1)
-                results = generator(input_ids=inputs, attention_mask=source_mask,
-                                    labels=outputs, decoder_attention_mask=target_mask, score=scores)
+                if args.passage_number == 1:
+                    results = generator(input_ids=inputs, attention_mask=source_mask,
+                                        labels=outputs, decoder_attention_mask=target_mask)
+                else:
+                    scores = torch.tensor(scores)
+                    softmax = nn.Softmax(dim=-1)
+                    scores = softmax(scores)
+                    scores = scores.view(-1)
+                    results = generator(input_ids=inputs, attention_mask=source_mask,
+                                        labels=outputs, decoder_attention_mask=target_mask, score=scores)
                 loss = results.loss
                 
                 if args.n_gpu > 1:
@@ -377,10 +381,10 @@ def main():
                         os.remove(output_model_file)
                     torch.save(model_to_save.state_dict(), output_model_file)
                     patience =0
-                else:
-                    patience += 1
-                    if patience == 2:
-                        break
+                # else:
+                #     patience += 1
+                #     if patience == 2:
+                #         break
                 
     if args.do_test:          
         checkpoint_prefix = 'checkpoint-best-bleu/generator_model.bin'
