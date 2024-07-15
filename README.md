@@ -36,7 +36,7 @@ python run.py \
 	--learning_rate 5e-5 \
 	--gradient_accumulation_steps 4 \
 	--num_train_epochs 10 \
-	--passage_number 4 \
+	--passage_number ${number} \
 	--GPU_ids 0,1
 ```
 
